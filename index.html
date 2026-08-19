@@ -2,14 +2,13 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="game-version" content="1.3.0">
-  <!-- TAG ANTI-CACHE ESTREMI -->
+  <meta name="game-version" content="1.3.1">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <meta http-equiv="Expires" content="Tue, 01 Jan 1980 1:00:00 GMT">
 
-  <title>Point Panic! XR - v1.3.0</title>
+  <title>Point Panic! XR - v1.3.1</title>
   <style>
     body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
     canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
@@ -40,14 +39,14 @@
     }
   </style>
 
-  <!-- LIBRERIE THREE.JS NECESSARIE PER I CONTROLLER VIRTUALI -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/XRControllerModelFactory.js"></script>
+  <!-- LIBRERIE VIA UNPKG (Più stabili per le versioni legacy r128) -->
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/webxr/XRControllerModelFactory.js"></script>
 </head>
 <body>
 
-<div id="version-badge">v1.3.0</div>
+<div id="version-badge">v1.3.1</div>
 <div id="debug-log"></div>
 
 <div id="xr-button-container">
@@ -56,15 +55,14 @@
 </div>
 
 <script>
-  // Log a schermo per il debug
   function log(msg) {
     const el = document.getElementById('debug-log');
     el.style.display = 'block';
     el.innerHTML += msg + '<br>';
   }
-  window.addEventListener('error', function(e) { log(`[ERRORE] ${e.message}`); });
+  window.addEventListener('error', function(e) { log(`[GLOBAL ERROR] ${e.message}`); });
 
-  const GAME_VERSION = "v1.3.0";
+  const GAME_VERSION = "v1.3.1";
 
   let scene, camera, renderer, controller, controllerGrip;
   let raycaster, tempMatrix;
@@ -116,7 +114,7 @@
     tempMatrix = new THREE.Matrix4();
 
     // ========================================================
-    // 1. GESTIONE TARGET RAY (Mirino e logica di sparo)
+    // 1. TARGET RAY (Mirino, Canna e Laser)
     // ========================================================
     controller = renderer.xr.getController(0);
     controller.addEventListener('selectstart', onTriggerPress);
@@ -124,18 +122,16 @@
 
     const gunGroup = new THREE.Group();
     
-    // Canna (posizionata leggermente in avanti rispetto al controller)
     const barrel = new THREE.Mesh(
       new THREE.CylinderGeometry(0.015, 0.015, 0.25),
       new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 })
     );
     barrel.rotation.x = -Math.PI / 2;
-    barrel.position.set(0, 0, -0.15); // Offset per non compenetrare il controller
+    barrel.position.set(0, 0, -0.15);
     gunGroup.add(barrel);
 
-    // Laser
     const laserGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, -0.27), // Parte dalla punta della canna
+      new THREE.Vector3(0, 0, -0.27),
       new THREE.Vector3(0, 0, -5)
     ]);
     const laserMat = new THREE.LineBasicMaterial({ color: 0xff00cc, opacity: 0.8, transparent: true });
@@ -145,13 +141,32 @@
     controller.add(gunGroup);
 
     // ========================================================
-    // 2. GESTIONE GRIP SPACE (Modello visivo del Controller)
+    // 2. GRIP SPACE CON FALLBACK SICURO
     // ========================================================
-    const controllerModelFactory = new THREE.XRControllerModelFactory();
     controllerGrip = renderer.xr.getControllerGrip(0);
-    const controllerModel = controllerModelFactory.createControllerModel(controllerGrip);
-    controllerGrip.add(controllerModel);
     scene.add(controllerGrip);
+
+    try {
+      // Tentativo di caricare il modello ufficiale del visore
+      if (typeof THREE.XRControllerModelFactory !== 'undefined') {
+        const controllerModelFactory = new THREE.XRControllerModelFactory();
+        const controllerModel = controllerModelFactory.createControllerModel(controllerGrip);
+        controllerGrip.add(controllerModel);
+      } else {
+        throw new Error("La classe non esiste nell'oggetto THREE globale.");
+      }
+    } catch (err) {
+      log(`Controller Model fallback attivato: ${err.message}`);
+      
+      // Impugnatura di emergenza (Scatola Grigia)
+      const fallbackHandle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.12, 0.04),
+        new THREE.MeshStandardMaterial({ color: 0x333333 })
+      );
+      fallbackHandle.position.set(0, -0.04, 0.02);
+      fallbackHandle.rotation.x = Math.PI / 8;
+      controllerGrip.add(fallbackHandle);
+    }
     // ========================================================
 
     createLeftHUD();
@@ -213,7 +228,6 @@
     hudContext.fillText('• Yellow Bonus:  +20', 40, 310);
     hudContext.fillText('• Black Penalty: -30', 40, 350);
 
-    // Disegno Bottone HUD
     hudContext.fillStyle = laserEnabled ? '#00ffcc' : '#555555';
     hudContext.fillRect(40, 400, 220, 60);
     
@@ -245,7 +259,7 @@
       arBtn.disabled = true;
       vrBtn.textContent = 'NO API XR';
       arBtn.textContent = 'NO API XR';
-      log("WebXR non supportato o bloccato (Serve HTTPS).");
+      log("WebXR non supportato (Serve HTTPS o Localhost).");
     }
   }
 
