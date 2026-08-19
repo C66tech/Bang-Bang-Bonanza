@@ -3,12 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  
-  <!-- TAG META ANTI-CACHE -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-
   <title>Bang Bang Bonanza - WebXR Target Shooter</title>
   <style>
     body {
@@ -18,7 +15,6 @@
       font-family: Arial, sans-serif;
     }
 
-    /* CONTENITORE FLEXBOX PER AFFIANCARE I BOTTONI XR SENZA SOVRAPPOSIZIONI */
     #xr-button-container {
       position: absolute;
       bottom: 20px;
@@ -37,8 +33,6 @@
       margin: 0 !important;
     }
   </style>
-
-  <!-- Import Map Three.js via ES Modules -->
   <script type="importmap">
     {
       "imports": {
@@ -57,40 +51,18 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     let scene, camera, renderer, controls, floorWireframe;
-    let controllers = [];
-    let gunPivots = [];
-    let laserLines = [];
-    let tracers = [];
-    let hudButtons = [];
+    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [];
     let score = 0;
-    
-    // STATO DEL GIOCO: 'LOBBY' oppure 'PLAYING'
     let gameState = 'LOBBY';
-
-    // INCLINAZIONE DEFAULT -14°
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
-    
-    // Gestione Minigiochi
-    let activeMiniGame = null;
-    let miniGameList = [];
-    let currentMiniGameIndex = 0;
-
-    // Web Audio API Context
+    let activeMiniGame = null, miniGameList = [], currentMiniGameIndex = 0;
     let audioCtx = null;
-
-    // Elementi HUD 3D
     let hudCanvas, hudCtx, hudTexture;
     let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
-
-    // Logo Mesh
     let logoMesh = null;
-
     const clock = new THREE.Clock();
 
-    // ==========================================
-    // CLASSE MINIGIOCO 1 (Griglia 3x3 Sfere Colorate)
-    // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -109,39 +81,18 @@
 
       init() {
         this.cleanup();
-
-        const rows = 3;
-        const cols = 3;
-        const spacingX = 0.45;
-        const spacingY = 0.30;
+        const rows = 3, cols = 3, spacingX = 0.45, spacingY = 0.30;
         const startX = -((cols - 1) * spacingX) / 2;
-        const startY = 0.60;
-        const centerZ = -2.2;
-
+        const startY = 0.60, centerZ = -2.2;
         const geo = new THREE.SphereGeometry(0.14, 24, 24);
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const randomColor = this.getRandomColorObj();
-            
-            const mat = new THREE.MeshStandardMaterial({
-              color: randomColor.hex,
-              roughness: 0.2,
-              metalness: 0.5
-            });
-
+            const mat = new THREE.MeshStandardMaterial({ color: randomColor.hex, roughness: 0.2, metalness: 0.5 });
             const sphere = new THREE.Mesh(geo, mat);
-            sphere.position.set(
-              startX + c * spacingX,
-              startY + r * spacingY,
-              centerZ
-            );
-
-            sphere.userData = {
-              colorInfo: randomColor,
-              active: true
-            };
-
+            sphere.position.set(startX + c * spacingX, startY + r * spacingY, centerZ);
+            sphere.userData = { colorInfo: randomColor, active: true };
             this.scene.add(sphere);
             this.spheres.push(sphere);
           }
@@ -149,8 +100,7 @@
       }
 
       getRandomColorObj() {
-        const idx = Math.floor(Math.random() * this.colorPalette.length);
-        return this.colorPalette[idx];
+        return this.colorPalette[Math.floor(Math.random() * this.colorPalette.length)];
       }
 
       getTargetObjects() {
@@ -160,9 +110,7 @@
       onHit(hitObject) {
         const sphere = this.spheres.find(s => s === hitObject);
         if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
-
         const points = sphere.userData.colorInfo.points;
-
         sphere.userData.active = false;
         sphere.visible = false;
 
@@ -175,31 +123,19 @@
             sphere.visible = true;
           }
         }, 2000);
-
         return points;
       }
 
       update(delta) {
-        this.spheres.forEach(s => {
-          if (s.userData.active && s.visible) {
-            s.rotation.y += 0.8 * delta;
-          }
-        });
+        this.spheres.forEach(s => { if (s.userData.active && s.visible) s.rotation.y += 0.8 * delta; });
       }
 
       cleanup() {
-        this.spheres.forEach(s => {
-          this.scene.remove(s);
-          s.geometry.dispose();
-          s.material.dispose();
-        });
+        this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.spheres = [];
       }
     }
 
-    // ==========================================
-    // CLASSE MINIGIOCO 2 (5 Sfere 1 Riga + Timer 5s)
-    // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -222,40 +158,24 @@
         this.cleanup();
         this.timer = 0;
         this.isWaveActive = true;
-
-        const count = 5;
-        const spacingX = 0.45;
+        const count = 5, spacingX = 0.45;
         const startX = -((count - 1) * spacingX) / 2;
-        const posY = 0.90;
-        const posZ = -2.2;
-
+        const posY = 0.90, posZ = -2.2;
         const geo = new THREE.SphereGeometry(0.14, 24, 24);
 
         for (let i = 0; i < count; i++) {
           const colorObj = this.getRandomColorObj();
-
-          const mat = new THREE.MeshStandardMaterial({
-            color: colorObj.hex,
-            roughness: 0.2,
-            metalness: 0.5
-          });
-
+          const mat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.5 });
           const sphere = new THREE.Mesh(geo, mat);
           sphere.position.set(startX + i * spacingX, posY, posZ);
-
-          sphere.userData = {
-            colorInfo: colorObj,
-            active: true
-          };
-
+          sphere.userData = { colorInfo: colorObj, active: true };
           this.scene.add(sphere);
           this.spheres.push(sphere);
         }
       }
 
       getRandomColorObj() {
-        const idx = Math.floor(Math.random() * this.colorPalette.length);
-        return this.colorPalette[idx];
+        return this.colorPalette[Math.floor(Math.random() * this.colorPalette.length)];
       }
 
       getTargetObjects() {
@@ -265,29 +185,20 @@
       onHit(hitObject) {
         const sphere = this.spheres.find(s => s === hitObject);
         if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
-
         const points = sphere.userData.colorInfo.points;
-
         sphere.userData.active = false;
         sphere.visible = false;
-
         return points;
       }
 
       update(delta) {
         this.timer += delta;
-
         if (this.isWaveActive && this.timer >= 5.0) {
           this.isWaveActive = false;
-          this.spheres.forEach(s => {
-            s.userData.active = false;
-            s.visible = false;
-          });
-        } 
-        else if (!this.isWaveActive && this.timer >= 6.0) {
+          this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
+        } else if (!this.isWaveActive && this.timer >= 6.0) {
           this.timer = 0;
           this.isWaveActive = true;
-
           this.spheres.forEach(s => {
             const newColor = this.getRandomColorObj();
             s.userData.colorInfo = newColor;
@@ -296,40 +207,25 @@
             s.visible = true;
           });
         }
-
-        this.spheres.forEach(s => {
-          if (s.visible) {
-            s.rotation.y += 0.8 * delta;
-          }
-        });
+        this.spheres.forEach(s => { if (s.visible) s.rotation.y += 0.8 * delta; });
       }
 
       cleanup() {
-        this.spheres.forEach(s => {
-          this.scene.remove(s);
-          s.geometry.dispose();
-          s.material.dispose();
-        });
+        this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.spheres = [];
       }
     }
 
-    // ==========================================
-    // INIZIALIZZAZIONE APPLICAZIONE WEBXR
-    // ==========================================
     init();
 
     function init() {
-      // 1. Scena 3D
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0c0f1d);
 
-      // 2. Camera
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
       camera.position.set(0, 1.2, 0.5);
       camera.lookAt(0, 1.0, -2.0);
 
-      // 3. Illuminazione
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
       scene.add(ambientLight);
 
@@ -337,34 +233,29 @@
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
 
-      // PAVIMENTO WIREFRAME A Y = 0
       const floorGeo = new THREE.PlaneGeometry(10, 10, 20, 20);
       floorGeo.rotateX(-Math.PI / 2);
-      const floorMat = new THREE.MeshBasicMaterial({ 
-        color: 0x00ffcc, 
-        wireframe: true,
-        transparent: true,
-        opacity: 0.7
-      });
+      const floorMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, wireframe: true, transparent: true, opacity: 0.7 });
       floorWireframe = new THREE.Mesh(floorGeo, floorMat);
       floorWireframe.position.y = 0;
       scene.add(floorWireframe);
 
-      // 4. Renderer WebGL + WebXR
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
-      
-      // CONFIGURAZIONE SPAZIO DI RIFERIMENTO 'local-floor'
-      renderer.xr.setReferenceSpaceType('local-floor');
-
       document.body.appendChild(renderer.domElement);
 
-      // TRASPARENZA AR PASSTHROUGH E CONFIGURAZIONE RIFERIMENTO
-      renderer.xr.addEventListener('sessionstart', () => {
+      // GESTIONE STANDARD WEBXR PER LOCAL-FLOOR
+      renderer.xr.addEventListener('sessionstart', async () => {
         const session = renderer.xr.getSession();
-        renderer.xr.setReferenceSpaceType('local-floor');
+        
+        try {
+          const refSpace = await session.requestReferenceSpace('local-floor');
+          renderer.xr.setReferenceSpace(refSpace);
+        } catch (e) {
+          console.warn("Spazio 'local-floor' non disponibile, fallback su 'local'.", e);
+        }
 
         if (session.mode === 'immersive-ar') {
           scene.background = null;
@@ -377,12 +268,10 @@
         scene.background = new THREE.Color(0x0c0f1d);
       });
 
-      // Controlli Desktop (Mouse)
       controls = new OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.0, -2.0);
       controls.update();
 
-      // 5. BOTTONI VR E AR (AR RICHIEDE OBBLIGATORIAMENTE 'local-floor')
       const xrContainer = document.createElement('div');
       xrContainer.id = 'xr-button-container';
       document.body.appendChild(xrContainer);
@@ -395,22 +284,13 @@
       xrContainer.appendChild(vrButton);
       xrContainer.appendChild(arButton);
 
-      // 6. Setup Controller e Pistole
       setupControllers();
-
-      // 7. Setup HUD 3D
       create3DHUD();
-
-      // 8. Schermata di Presentazione / Logo
       createPresentationLogo();
-
-      // Applicazione inclinazione iniziale (-14°)
       updateGunRotation();
 
-      // 9. Registro Minigiochi
       miniGameList = [MiniGame1, MiniGame2];
       currentMiniGameIndex = 0;
-
       gameState = 'LOBBY';
       updateHudTexture();
 
@@ -418,149 +298,88 @@
       window.addEventListener('click', initAudio, { once: true });
       window.addEventListener('pointerdown', onDesktopShoot);
 
-      // Render Loop per WebXR
       renderer.setAnimationLoop(animate);
     }
 
     function startSelectedGame() {
-      if (activeMiniGame) {
-        activeMiniGame.cleanup();
-      }
+      if (activeMiniGame) activeMiniGame.cleanup();
       gameState = 'PLAYING';
       score = 0;
-
-      // NASCONDE IL LOGO DURANTE IL GIOCO
       if (logoMesh) logoMesh.visible = false;
-
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
-      
       updateHudTexture();
       update3DButtonText(btnStartMesh, "⏹ STOP GIOCO", "#ff2a6d");
     }
 
     function stopCurrentGame() {
-      if (activeMiniGame) {
-        activeMiniGame.cleanup();
-        activeMiniGame = null;
-      }
+      if (activeMiniGame) { activeMiniGame.cleanup(); activeMiniGame = null; }
       gameState = 'LOBBY';
-
-      // MOSTRA DI NUOVO IL LOGO IN LOBBY
       if (logoMesh) logoMesh.visible = true;
-
       updateHudTexture();
       update3DButtonText(btnStartMesh, "▶ START GIOCO", "#00ffcc");
     }
 
     function switchNextMiniGame() {
       currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
-      
-      if (gameState === 'PLAYING') {
-        startSelectedGame();
-      } else {
-        updateHudTexture();
-      }
+      if (gameState === 'PLAYING') startSelectedGame();
+      else updateHudTexture();
     }
 
     function createPresentationLogo() {
       const logoGeo = new THREE.PlaneGeometry(1, 1);
-      const logoMat = new THREE.MeshBasicMaterial({
-        transparent: true,
-        alphaTest: 0.05,
-        side: THREE.DoubleSide
-      });
-
+      const logoMat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.05, side: THREE.DoubleSide });
       logoMesh = new THREE.Mesh(logoGeo, logoMat);
       logoMesh.position.set(0, 1.45, -2.0);
       logoMesh.visible = (gameState === 'LOBBY');
       scene.add(logoMesh);
 
       const textureLoader = new THREE.TextureLoader();
-      textureLoader.load(
-        'logo.png',
-        (texture) => {
-          texture.colorSpace = THREE.SRGBColorSpace;
-          logoMat.map = texture;
-
-          const imgWidth = texture.image.width;
-          const imgHeight = texture.image.height;
-          const aspectRatio = imgWidth / imgHeight;
-
-          const targetHeight = 0.55;
-          logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
-          logoMat.needsUpdate = true;
-        },
-        undefined,
-        () => {
-          console.warn("logo.png non trovato. Generazione logo di riserva.");
-          const canvas = document.createElement('canvas');
-          canvas.width = 512;
-          canvas.height = 256;
-          const ctx = canvas.getContext('2d');
-
-          ctx.fillStyle = 'rgba(10, 15, 30, 0.85)';
-          ctx.fillRect(10, 10, 492, 236);
-
-          ctx.strokeStyle = '#ff2a6d';
-          ctx.lineWidth = 6;
-          ctx.strokeRect(10, 10, 492, 236);
-
-          ctx.fillStyle = '#ff2a6d';
-          ctx.font = 'bold 36px Arial';
-          ctx.textAlign = 'center';
-          ctx.fillText('BANG BANG', 256, 110);
-
-          ctx.fillStyle = '#00ffcc';
-          ctx.font = 'bold 42px Arial';
-          ctx.fillText('BONANZA', 256, 175);
-
-          const fallbackTexture = new THREE.CanvasTexture(canvas);
-          logoMat.map = fallbackTexture;
-          logoMesh.scale.set(1.2, 0.6, 1);
-          logoMat.needsUpdate = true;
-        }
-      );
+      textureLoader.load('logo.png', (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        logoMat.map = texture;
+        const aspectRatio = texture.image.width / texture.image.height;
+        const targetHeight = 0.55;
+        logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
+        logoMat.needsUpdate = true;
+      }, undefined, () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.85)'; ctx.fillRect(10, 10, 492, 236);
+        ctx.strokeStyle = '#ff2a6d'; ctx.lineWidth = 6; ctx.strokeRect(10, 10, 492, 236);
+        ctx.fillStyle = '#ff2a6d'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('BANG BANG', 256, 110);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 42px Arial'; ctx.fillText('BONANZA', 256, 175);
+        logoMat.map = new THREE.CanvasTexture(canvas);
+        logoMesh.scale.set(1.2, 0.6, 1);
+        logoMat.needsUpdate = true;
+      });
     }
 
-    // --- SINTETIZZATORE AUDIO WEB AUDIO API ---
     function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
     function playGunshotSound() {
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
-
-      const bufferSize = audioCtx.sampleRate * 0.12;
-      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.12, audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
+      for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
 
       const noise = audioCtx.createBufferSource();
       noise.buffer = buffer;
-
       const filter = audioCtx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.setValueAtTime(1400, now);
       filter.frequency.exponentialRampToValueAtTime(100, now + 0.12);
-
       const gain = audioCtx.createGain();
       gain.gain.setValueAtTime(1.0, now);
       gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
 
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(audioCtx.destination);
-
+      noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
       noise.start(now);
     }
 
@@ -568,10 +387,8 @@
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
-
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-
       osc.type = 'sine';
       if (isNegative) {
         osc.frequency.setValueAtTime(250, now);
@@ -580,203 +397,119 @@
         osc.frequency.setValueAtTime(350, now);
         osc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
       }
-
       gain.gain.setValueAtTime(0.8, now);
       gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.12);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.12);
     }
 
-    // --- HUD 3D SPOSTATO PIÙ A SINISTRA (X = -1.25, Z = -1.5, Rotazione = 32°) ---
     function create3DHUD() {
       const hudGroup = new THREE.Group();
       hudGroup.position.set(-1.25, 1.05, -1.5);
       hudGroup.rotation.y = THREE.MathUtils.degToRad(32);
 
       hudCanvas = document.createElement('canvas');
-      hudCanvas.width = 512;
-      hudCanvas.height = 340;
+      hudCanvas.width = 512; hudCanvas.height = 340;
       hudCtx = hudCanvas.getContext('2d');
-
       hudTexture = new THREE.CanvasTexture(hudCanvas);
       updateHudTexture();
 
       const panelGeo = new THREE.PlaneGeometry(0.85, 0.58);
       const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
-      const panelMesh = new THREE.Mesh(panelGeo, panelMat);
-      hudGroup.add(panelMesh);
+      hudGroup.add(new THREE.Mesh(panelGeo, panelMat));
 
-      // --- PULSANTI 3D SPARABILI ---
       btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.24, 0.09);
       btnPitchDownMesh.position.set(-0.28, -0.38, 0);
       btnPitchDownMesh.userData = { action: 'pitch_down' };
-      hudGroup.add(btnPitchDownMesh);
-      hudButtons.push(btnPitchDownMesh);
+      hudGroup.add(btnPitchDownMesh); hudButtons.push(btnPitchDownMesh);
 
       btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.24, 0.09);
       btnPitchUpMesh.position.set(-0.02, -0.38, 0);
       btnPitchUpMesh.userData = { action: 'pitch_up' };
-      hudGroup.add(btnPitchUpMesh);
-      hudButtons.push(btnPitchUpMesh);
+      hudGroup.add(btnPitchUpMesh); hudButtons.push(btnPitchUpMesh);
 
       btnLaserToggleMesh = create3DButton("Laser: ON", 0.24, 0.09);
       btnLaserToggleMesh.position.set(0.24, -0.38, 0);
       btnLaserToggleMesh.userData = { action: 'toggle_laser' };
-      hudGroup.add(btnLaserToggleMesh);
-      hudButtons.push(btnLaserToggleMesh);
+      hudGroup.add(btnLaserToggleMesh); hudButtons.push(btnLaserToggleMesh);
 
       btnGameSelectMesh = create3DButton("Cambia Gioco 🔄", 0.38, 0.09);
       btnGameSelectMesh.position.set(-0.21, -0.50, 0);
       btnGameSelectMesh.userData = { action: 'select_game' };
-      hudGroup.add(btnGameSelectMesh);
-      hudButtons.push(btnGameSelectMesh);
+      hudGroup.add(btnGameSelectMesh); hudButtons.push(btnGameSelectMesh);
 
       btnStartMesh = create3DButton("▶ START GIOCO", 0.38, 0.09, "#00ffcc");
       btnStartMesh.position.set(0.18, -0.50, 0);
       btnStartMesh.userData = { action: 'toggle_start' };
-      hudGroup.add(btnStartMesh);
-      hudButtons.push(btnStartMesh);
+      hudGroup.add(btnStartMesh); hudButtons.push(btnStartMesh);
 
       scene.add(hudGroup);
     }
 
     function updateHudTexture() {
-      hudCtx.fillStyle = '#0a0f1e';
-      hudCtx.fillRect(0, 0, 512, 340);
-
-      hudCtx.strokeStyle = '#00ffcc';
-      hudCtx.lineWidth = 8;
-      hudCtx.strokeRect(4, 4, 504, 332);
-
-      hudCtx.fillStyle = '#ff2a6d';
-      hudCtx.font = 'bold 26px Arial';
-      hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-
-      hudCtx.fillStyle = '#ffffff';
-      hudCtx.font = 'bold 18px Arial';
-      hudCtx.fillText('Versione: v2.8.0', 28, 80);
-
-      hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703';
-      hudCtx.font = 'bold 20px Arial';
+      hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
+      hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
+      hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.0.0 (Native Local-Floor)', 28, 80);
+      hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
-
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
-      hudCtx.fillStyle = '#00ffcc';
-      hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Gioco: ' + selectedName, 28, 155);
-
-      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d';
-      hudCtx.font = 'bold 32px Arial';
-      hudCtx.fillText('Punti: ' + score, 28, 220);
-
-      const degPitch = Math.round(THREE.MathUtils.radToDeg(currentGunPitch));
-      hudCtx.fillStyle = '#ffb703';
-      hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Inclinazione: ' + degPitch + '°', 28, 275);
-
+      hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; hudCtx.fillText('Gioco: ' + selectedName, 28, 155);
+      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; hudCtx.fillText('Punti: ' + score, 28, 220);
+      hudCtx.fillStyle = '#ffb703'; hudCtx.font = 'bold 22px Arial';
+      hudCtx.fillText('Inclinazione: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 275);
       hudTexture.needsUpdate = true;
     }
 
     function create3DButton(label, width, height, strokeColor = '#00ffcc') {
       const btnCanvas = document.createElement('canvas');
-      btnCanvas.width = 300;
-      btnCanvas.height = 100;
+      btnCanvas.width = 300; btnCanvas.height = 100;
       const ctx = btnCanvas.getContext('2d');
-
-      ctx.fillStyle = '#0d222a';
-      ctx.fillRect(0, 0, 300, 100);
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 6;
-      ctx.strokeRect(4, 4, 292, 92);
-
-      ctx.fillStyle = strokeColor;
-      ctx.font = 'bold 22px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 300, 100);
+      ctx.strokeStyle = strokeColor; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 292, 92);
+      ctx.fillStyle = strokeColor; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(label, 150, 50);
 
       const btnTex = new THREE.CanvasTexture(btnCanvas);
-      const geo = new THREE.BoxGeometry(width, height, 0.04);
-      const mat = new THREE.MeshStandardMaterial({ map: btnTex, roughness: 0.3 });
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.04), new THREE.MeshStandardMaterial({ map: btnTex, roughness: 0.3 }));
       mesh.userData = { canvas: btnCanvas, ctx: ctx, texture: btnTex };
-
       return mesh;
     }
 
     function update3DButtonText(btnMesh, label, colorHex = '#00ffcc') {
       const ctx = btnMesh.userData.ctx;
-      ctx.fillStyle = '#0d222a';
-      ctx.fillRect(0, 0, 300, 100);
-      ctx.strokeStyle = colorHex;
-      ctx.lineWidth = 6;
-      ctx.strokeRect(4, 4, 292, 92);
-
-      ctx.fillStyle = colorHex;
-      ctx.font = 'bold 22px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 300, 100);
+      ctx.strokeStyle = colorHex; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 292, 92);
+      ctx.fillStyle = colorHex; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(label, 150, 50);
-
       btnMesh.userData.texture.needsUpdate = true;
     }
 
-    // MODELLO PISTOLA ROSSA CON MIRINO AD ANELLO
     function createRedGunModel() {
       const gunGroup = new THREE.Group();
+      const redGunMat = new THREE.MeshStandardMaterial({ color: 0xe60000, roughness: 0.2, metalness: 0.5 });
+      const blackDetailMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6 });
 
-      const redGunMat = new THREE.MeshStandardMaterial({ 
-        color: 0xe60000, 
-        roughness: 0.2, 
-        metalness: 0.5 
-      });
-      const blackDetailMat = new THREE.MeshStandardMaterial({ 
-        color: 0x111111, 
-        roughness: 0.6 
-      });
-
-      // Canna
       const barrelGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.26, 16);
       barrelGeo.rotateX(Math.PI / 2);
       const barrel = new THREE.Mesh(barrelGeo, redGunMat);
       barrel.position.set(0, 0, -0.1);
       gunGroup.add(barrel);
 
-      // Impugnatura
-      const handleGeo = new THREE.BoxGeometry(0.03, 0.12, 0.04);
-      const handle = new THREE.Mesh(handleGeo, blackDetailMat);
-      handle.position.set(0, -0.05, 0.02);
-      handle.rotation.x = -0.3;
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.04), blackDetailMat);
+      handle.position.set(0, -0.05, 0.02); handle.rotation.x = -0.3;
       gunGroup.add(handle);
 
-      // Mirino ad Anello (Ghost Ring)
-      const ringGeo = new THREE.TorusGeometry(0.015, 0.003, 8, 24);
-      const ringMesh = new THREE.Mesh(ringGeo, blackDetailMat);
+      const ringMesh = new THREE.Mesh(new THREE.TorusGeometry(0.015, 0.003, 8, 24), blackDetailMat);
       ringMesh.position.set(0, 0.032, 0.02);
       gunGroup.add(ringMesh);
 
-      // Mirino Anteriore
-      const frontSightGeo = new THREE.BoxGeometry(0.004, 0.012, 0.004);
-      const frontSightMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-      const frontSight = new THREE.Mesh(frontSightGeo, frontSightMat);
+      const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.012, 0.004), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
       frontSight.position.set(0, 0.026, -0.22);
       gunGroup.add(frontSight);
 
-      // Laser
-      const laserGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, -0.23),
-        new THREE.Vector3(0, 0, -15)
-      ]);
-      const laserMat = new THREE.LineBasicMaterial({ 
-        color: 0xff0000, 
-        transparent: true, 
-        opacity: 0.6 
-      });
-      const laserLine = new THREE.Line(laserGeo, laserMat);
+      const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -0.23), new THREE.Vector3(0, 0, -15)]);
+      const laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6 }));
       laserLine.visible = laserEnabled;
       gunGroup.add(laserLine);
       laserLines.push(laserLine);
@@ -787,15 +520,10 @@
     function setupControllers() {
       for (let i = 0; i < 2; i++) {
         const controller = renderer.xr.getController(i);
-
         const pivot = new THREE.Group();
-        const gun = createRedGunModel();
-        
-        pivot.add(gun);
+        pivot.add(createRedGunModel());
         controller.add(pivot);
-
         controller.addEventListener('selectstart', onXRShoot);
-
         scene.add(controller);
         controllers.push(controller);
         gunPivots.push(pivot);
@@ -803,9 +531,7 @@
     }
 
     function updateGunRotation() {
-      gunPivots.forEach(pivot => {
-        pivot.rotation.x = currentGunPitch;
-      });
+      gunPivots.forEach(pivot => { pivot.rotation.x = currentGunPitch; });
       updateHudTexture();
     }
 
@@ -819,87 +545,52 @@
       const controller = event.target;
       const pivot = controller.children.find(c => gunPivots.includes(c));
       if (!pivot) return;
-
-      const origin = new THREE.Vector3();
-      const worldQuat = new THREE.Quaternion();
-
+      const origin = new THREE.Vector3(), worldQuat = new THREE.Quaternion();
       pivot.getWorldPosition(origin);
       pivot.getWorldQuaternion(worldQuat);
-
-      const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
-      processShot(origin, direction);
+      processShot(origin, new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat));
     }
 
     function onDesktopShoot(event) {
       if (renderer.xr.isPresenting) return;
-
       const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2(
-        (event.clientX / window.innerWidth) * 2 - 1,
-        -(event.clientY / window.innerHeight) * 2 + 1
-      );
-
+      const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
       raycaster.setFromCamera(mouse, camera);
       processShot(raycaster.ray.origin, raycaster.ray.direction);
     }
 
     function processShot(origin, direction) {
       playGunshotSound();
-
       const raycaster = new THREE.Raycaster(origin, direction);
-
       const gameTargets = (activeMiniGame && gameState === 'PLAYING') ? activeMiniGame.getTargetObjects() : [];
-      const candidates = [...gameTargets, ...hudButtons];
-
-      const intersects = raycaster.intersectObjects(candidates, false);
+      const intersects = raycaster.intersectObjects([...gameTargets, ...hudButtons], false);
       let endPoint = origin.clone().add(direction.clone().multiplyScalar(25));
 
       if (intersects.length > 0) {
         const hit = intersects[0];
         endPoint = hit.point;
-
         const hitBtn = hudButtons.find(b => b === hit.object);
+
         if (hitBtn) {
           playPopSound(false);
-
-          if (hitBtn.userData.action === 'pitch_down') {
-            currentGunPitch += THREE.MathUtils.degToRad(1);
-            updateGunRotation();
-          } else if (hitBtn.userData.action === 'pitch_up') {
-            currentGunPitch -= THREE.MathUtils.degToRad(1);
-            updateGunRotation();
-          } else if (hitBtn.userData.action === 'toggle_laser') {
-            toggleLaser();
-          } else if (hitBtn.userData.action === 'select_game') {
-            switchNextMiniGame();
-          } else if (hitBtn.userData.action === 'toggle_start') {
-            if (gameState === 'LOBBY') {
-              startSelectedGame();
-            } else {
-              stopCurrentGame();
-            }
-          }
+          if (hitBtn.userData.action === 'pitch_down') { currentGunPitch += THREE.MathUtils.degToRad(1); updateGunRotation(); }
+          else if (hitBtn.userData.action === 'pitch_up') { currentGunPitch -= THREE.MathUtils.degToRad(1); updateGunRotation(); }
+          else if (hitBtn.userData.action === 'toggle_laser') { toggleLaser(); }
+          else if (hitBtn.userData.action === 'select_game') { switchNextMiniGame(); }
+          else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
         } else if (activeMiniGame && gameState === 'PLAYING') {
           const pointsEarned = activeMiniGame.onHit(hit.object);
-          if (pointsEarned !== 0) {
-            playPopSound(pointsEarned < 0);
-            score += pointsEarned;
-            updateHudTexture();
-          }
+          if (pointsEarned !== 0) { playPopSound(pointsEarned < 0); score += pointsEarned; updateHudTexture(); }
         }
       }
-
       createTracer(origin, endPoint);
     }
 
     function createTracer(start, end) {
-      const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
-      const mat = new THREE.LineBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 1.0
-      });
-      const line = new THREE.Line(geo, mat);
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([start, end]),
+        new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 1.0 })
+      );
       line.userData = { life: 0.06 };
       scene.add(line);
       tracers.push(line);
@@ -910,9 +601,7 @@
         const tracer = tracers[i];
         tracer.userData.life -= delta;
         if (tracer.userData.life <= 0) {
-          scene.remove(tracer);
-          tracer.geometry.dispose();
-          tracer.material.dispose();
+          scene.remove(tracer); tracer.geometry.dispose(); tracer.material.dispose();
           tracers.splice(i, 1);
         } else {
           tracer.material.opacity = tracer.userData.life / 0.06;
@@ -928,13 +617,8 @@
 
     function animate() {
       const delta = clock.getDelta();
-
-      if (activeMiniGame && gameState === 'PLAYING') {
-        activeMiniGame.update(delta);
-      }
-
+      if (activeMiniGame && gameState === 'PLAYING') activeMiniGame.update(delta);
       updateTracers(delta);
-
       renderer.render(scene, camera);
     }
   </script>
