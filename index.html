@@ -45,11 +45,8 @@
     let hudButtons = [];
     let score = 0;
     
-    // STATO DEL GIOCO: 'LOBBY' oppure 'PLAYING'
+    // STATO DEL GIOCO: 'LOBBY' (Presentazione) oppure 'PLAYING' (In gioco)
     let gameState = 'LOBBY';
-
-    // MODALITÀ ALTEZZA: 'STANDING' (In piedi) oppure 'SEATED' (Seduto)
-    let heightMode = 'STANDING';
 
     // INCLINAZIONE DEFAULT -14°
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
@@ -64,8 +61,8 @@
     let audioCtx = null;
 
     // Elementi HUD 3D
-    let hudGroup, hudCanvas, hudCtx, hudTexture;
-    let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh, btnHeightModeMesh;
+    let hudCanvas, hudCtx, hudTexture;
+    let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
 
     // Logo Mesh
     let logoMesh = null;
@@ -91,16 +88,15 @@
         ];
       }
 
-      init(currentHeightMode = 'STANDING') {
+      init() {
         this.cleanup();
 
-        const isSeated = (currentHeightMode === 'SEATED');
         const rows = 3;
         const cols = 3;
         const spacingX = 0.55;
-        const spacingY = 0.40;
+        const spacingY = 0.45;
         const startX = -((cols - 1) * spacingX) / 2;
-        const startY = isSeated ? 0.05 : 0.20;
+        const startY = 0.25;
         const centerZ = -2.5;
 
         const geo = new THREE.SphereGeometry(0.16, 24, 24);
@@ -124,23 +120,13 @@
 
             sphere.userData = {
               colorInfo: randomColor,
-              active: true,
-              baseR: r
+              active: true
             };
 
             this.scene.add(sphere);
             this.spheres.push(sphere);
           }
         }
-      }
-
-      setHeightMode(mode) {
-        const isSeated = (mode === 'SEATED');
-        const spacingY = 0.40;
-        const startY = isSeated ? 0.05 : 0.20;
-        this.spheres.forEach(s => {
-          s.position.y = startY + s.userData.baseR * spacingY;
-        });
       }
 
       getRandomColorObj() {
@@ -213,16 +199,15 @@
         ];
       }
 
-      init(currentHeightMode = 'STANDING') {
+      init() {
         this.cleanup();
         this.timer = 0;
         this.isWaveActive = true;
 
-        const isSeated = (currentHeightMode === 'SEATED');
         const count = 5;
         const spacingX = 0.55;
         const startX = -((count - 1) * spacingX) / 2;
-        const posY = isSeated ? 0.15 : 0.30;
+        const posY = 0.35;
         const posZ = -2.5;
 
         const geo = new THREE.SphereGeometry(0.16, 24, 24);
@@ -247,14 +232,6 @@
           this.scene.add(sphere);
           this.spheres.push(sphere);
         }
-      }
-
-      setHeightMode(mode) {
-        const isSeated = (mode === 'SEATED');
-        const posY = isSeated ? 0.15 : 0.30;
-        this.spheres.forEach(s => {
-          s.position.y = posY;
-        });
       }
 
       getRandomColorObj() {
@@ -326,12 +303,14 @@
     function init() {
       // 1. Scena 3D
       scene = new THREE.Scene();
+      
+      // Sfondo scuro in 3D/Desktop. Verrà annullato automaticamente in AR.
       scene.background = new THREE.Color(0x0c0f1d);
 
       // 2. Camera
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, 1.3, 0.5);
-      camera.lookAt(0, 1.1, -2.5);
+      camera.position.set(0, 1.5, 0.5);
+      camera.lookAt(0, 1.2, -2.5);
 
       // 3. Illuminazione
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
@@ -348,7 +327,7 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // TRASPARENZA IN AR PASSTHROUGH
+      // --- CORREZIONE AR PASSTHROUGH ---
       renderer.xr.addEventListener('sessionstart', () => {
         const session = renderer.xr.getSession();
         if (session.environmentBlendMode === 'additive' || session.environmentBlendMode === 'alpha-blend') {
@@ -362,7 +341,7 @@
 
       // Controlli per anteprima Desktop (Mouse)
       controls = new OrbitControls(camera, renderer.domElement);
-      controls.target.set(0, 1.1, -2.5);
+      controls.target.set(0, 1.2, -2.5);
       controls.update();
 
       // 5. Bottoni di ingresso VR e AR
@@ -372,7 +351,7 @@
       // 6. Setup Controller e Pistole
       setupControllers();
 
-      // 7. Setup HUD 3D
+      // 7. Setup HUD 3D Posizionato a Livello Testa
       create3DHUD();
 
       // 8. Schermata di Presentazione / Logo
@@ -385,41 +364,18 @@
       miniGameList = [MiniGame1, MiniGame2];
       currentMiniGameIndex = 0;
 
+      // Inizialmente siamo in LOBBY (nessun minigioco attivo)
       gameState = 'LOBBY';
-      applyHeightMode();
+      updateHudTexture();
 
       window.addEventListener('resize', onWindowResize);
       window.addEventListener('click', initAudio, { once: true });
+
+      // Supporto sparo con Mouse su Desktop (fuori dalla sessione XR)
       window.addEventListener('pointerdown', onDesktopShoot);
 
       // Render Loop per WebXR
       renderer.setAnimationLoop(animate);
-    }
-
-    function applyHeightMode() {
-      const isSeated = (heightMode === 'SEATED');
-
-      if (hudGroup) {
-        hudGroup.position.y = isSeated ? 0.85 : 1.25;
-      }
-
-      if (logoMesh) {
-        logoMesh.position.y = isSeated ? 1.35 : 1.80;
-      }
-
-      if (btnHeightModeMesh) {
-        update3DButtonText(
-          btnHeightModeMesh, 
-          isSeated ? "🪑 Seduto" : "🧍 In piedi", 
-          isSeated ? "#ffb703" : "#00ffcc"
-        );
-      }
-
-      if (activeMiniGame) {
-        activeMiniGame.setHeightMode(heightMode);
-      }
-
-      updateHudTexture();
     }
 
     function startSelectedGame() {
@@ -429,7 +385,7 @@
       gameState = 'PLAYING';
       score = 0;
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
-      activeMiniGame.init(heightMode);
+      activeMiniGame.init();
       
       updateHudTexture();
       update3DButtonText(btnStartMesh, "⏹ STOP GIOCO", "#ff2a6d");
@@ -455,6 +411,7 @@
       }
     }
 
+    // --- LOGO CON CALCOLO DINAMICO DELL'ASPECT RATIO ---
     function createPresentationLogo() {
       const logoGeo = new THREE.PlaneGeometry(1, 1);
       const logoMat = new THREE.MeshBasicMaterial({
@@ -464,7 +421,7 @@
       });
 
       logoMesh = new THREE.Mesh(logoGeo, logoMat);
-      logoMesh.position.set(0, 1.80, -2.5);
+      logoMesh.position.set(0, 2.15, -2.5);
       scene.add(logoMesh);
 
       const textureLoader = new THREE.TextureLoader();
@@ -478,7 +435,7 @@
           const imgHeight = texture.image.height;
           const aspectRatio = imgWidth / imgHeight;
 
-          const targetHeight = 0.8;
+          const targetHeight = 0.9;
           logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
           logoMat.needsUpdate = true;
         },
@@ -508,7 +465,7 @@
 
           const fallbackTexture = new THREE.CanvasTexture(canvas);
           logoMat.map = fallbackTexture;
-          logoMesh.scale.set(1.6, 0.8, 1);
+          logoMesh.scale.set(1.8, 0.9, 1);
           logoMat.needsUpdate = true;
         }
       );
@@ -582,21 +539,21 @@
       osc.stop(now + 0.12);
     }
 
-    // --- CREAZIONE HUD 3D ---
+    // --- CREAZIONE HUD 3D A LIVELLO DELLA TESTA CON PULSANTE START ---
     function create3DHUD() {
-      hudGroup = new THREE.Group();
-      hudGroup.position.set(-1.1, 1.25, -1.6);
+      const hudGroup = new THREE.Group();
+      hudGroup.position.set(-1.1, 1.45, -1.6);
       hudGroup.rotation.y = THREE.MathUtils.degToRad(22);
 
       hudCanvas = document.createElement('canvas');
       hudCanvas.width = 512;
-      hudCanvas.height = 360;
+      hudCanvas.height = 340;
       hudCtx = hudCanvas.getContext('2d');
 
       hudTexture = new THREE.CanvasTexture(hudCanvas);
       updateHudTexture();
 
-      const panelGeo = new THREE.PlaneGeometry(1.0, 0.72);
+      const panelGeo = new THREE.PlaneGeometry(1.0, 0.68);
       const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
       const panelMesh = new THREE.Mesh(panelGeo, panelMat);
       hudGroup.add(panelMesh);
@@ -604,86 +561,75 @@
       // --- PULSANTI 3D SPARABILI ---
       // 1. Inclina Avanti (+1°)
       btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.28, 0.11);
-      btnPitchDownMesh.position.set(-0.33, -0.48, 0);
+      btnPitchDownMesh.position.set(-0.33, -0.46, 0);
       btnPitchDownMesh.userData = { action: 'pitch_down' };
       hudGroup.add(btnPitchDownMesh);
       hudButtons.push(btnPitchDownMesh);
 
       // 2. Inclina Indietro (-1°)
       btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.28, 0.11);
-      btnPitchUpMesh.position.set(-0.02, -0.48, 0);
+      btnPitchUpMesh.position.set(-0.02, -0.46, 0);
       btnPitchUpMesh.userData = { action: 'pitch_up' };
       hudGroup.add(btnPitchUpMesh);
       hudButtons.push(btnPitchUpMesh);
 
       // 3. Toggle Laser
       btnLaserToggleMesh = create3DButton("Laser: ON", 0.28, 0.11);
-      btnLaserToggleMesh.position.set(0.29, -0.48, 0);
+      btnLaserToggleMesh.position.set(0.29, -0.46, 0);
       btnLaserToggleMesh.userData = { action: 'toggle_laser' };
       hudGroup.add(btnLaserToggleMesh);
       hudButtons.push(btnLaserToggleMesh);
 
-      // 4. SELETTORE ALTEZZA (IN PIEDI / SEDUTO)
-      btnHeightModeMesh = create3DButton("🧍 In piedi", 0.43, 0.11);
-      btnHeightModeMesh.position.set(-0.25, -0.62, 0);
-      btnHeightModeMesh.userData = { action: 'toggle_height' };
-      hudGroup.add(btnHeightModeMesh);
-      hudButtons.push(btnHeightModeMesh);
-
-      // 5. PULSANTE START GIOCO
-      btnStartMesh = create3DButton("▶ START GIOCO", 0.43, 0.11, "#00ffcc");
-      btnStartMesh.position.set(0.21, -0.62, 0);
-      btnStartMesh.userData = { action: 'toggle_start' };
-      hudGroup.add(btnStartMesh);
-      hudButtons.push(btnStartMesh);
-
-      // 6. Cambia Minigioco
-      btnGameSelectMesh = create3DButton("Cambia Gioco 🔄", 0.88, 0.11);
-      btnGameSelectMesh.position.set(-0.02, -0.76, 0);
+      // 4. Cambia Minigioco
+      btnGameSelectMesh = create3DButton("Cambia Gioco 🔄", 0.43, 0.11);
+      btnGameSelectMesh.position.set(-0.25, -0.60, 0);
       btnGameSelectMesh.userData = { action: 'select_game' };
       hudGroup.add(btnGameSelectMesh);
       hudButtons.push(btnGameSelectMesh);
+
+      // 5. PULSANTE START GIOCO
+      btnStartMesh = create3DButton("▶ START GIOCO", 0.43, 0.11, "#00ffcc");
+      btnStartMesh.position.set(0.21, -0.60, 0);
+      btnStartMesh.userData = { action: 'toggle_start' };
+      hudGroup.add(btnStartMesh);
+      hudButtons.push(btnStartMesh);
 
       scene.add(hudGroup);
     }
 
     function updateHudTexture() {
       hudCtx.fillStyle = '#0a0f1e';
-      hudCtx.fillRect(0, 0, 512, 360);
+      hudCtx.fillRect(0, 0, 512, 340);
 
       hudCtx.strokeStyle = '#00ffcc';
       hudCtx.lineWidth = 8;
-      hudCtx.strokeRect(4, 4, 504, 352);
+      hudCtx.strokeRect(4, 4, 504, 332);
 
       hudCtx.fillStyle = '#ff2a6d';
       hudCtx.font = 'bold 26px Arial';
-      hudCtx.fillText('BANG BANG BONANZA', 28, 42);
+      hudCtx.fillText('BANG BANG BONANZA', 28, 45);
 
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 18px Arial';
-      hudCtx.fillText('Versione: v2.2.0', 28, 75);
+      hudCtx.fillText('Versione: v2.1.0', 28, 80);
 
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703';
       hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 108);
+      hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE (LOBBY)'), 28, 115);
 
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
       hudCtx.fillStyle = '#00ffcc';
-      hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Gioco: ' + selectedName, 28, 142);
-
-      hudCtx.fillStyle = heightMode === 'SEATED' ? '#ffb703' : '#00ffcc';
-      hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Posizione: ' + (heightMode === 'SEATED' ? '🪑 SEDUTO' : '🧍 IN PIEDI'), 28, 176);
+      hudCtx.font = 'bold 22px Arial';
+      hudCtx.fillText('Gioco: ' + selectedName, 28, 155);
 
       hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d';
-      hudCtx.font = 'bold 30px Arial';
-      hudCtx.fillText('Punti: ' + score, 28, 235);
+      hudCtx.font = 'bold 32px Arial';
+      hudCtx.fillText('Punti: ' + score, 28, 220);
 
       const degPitch = Math.round(THREE.MathUtils.radToDeg(currentGunPitch));
       hudCtx.fillStyle = '#ffb703';
-      hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Inclinazione: ' + degPitch + '°', 28, 285);
+      hudCtx.font = 'bold 22px Arial';
+      hudCtx.fillText('Inclinazione: ' + degPitch + '°', 28, 275);
 
       hudTexture.needsUpdate = true;
     }
@@ -732,7 +678,7 @@
       btnMesh.userData.texture.needsUpdate = true;
     }
 
-    // MODELLO PISTOLA ROSSA CON MIRINO AD ANELLO
+    // MODELLO PISTOLA ROSSA CON MIRINO AD ANELLO (GHOST RING)
     function createRedGunModel() {
       const gunGroup = new THREE.Group();
 
@@ -760,7 +706,7 @@
       handle.rotation.x = -0.3;
       gunGroup.add(handle);
 
-      // Mirino ad Anello
+      // Mirino ad Anello (Ghost Ring)
       const ringGeo = new THREE.TorusGeometry(0.015, 0.003, 8, 24);
       const ringMesh = new THREE.Mesh(ringGeo, blackDetailMat);
       ringMesh.position.set(0, 0.032, 0.02);
@@ -877,9 +823,6 @@
             updateGunRotation();
           } else if (hitBtn.userData.action === 'toggle_laser') {
             toggleLaser();
-          } else if (hitBtn.userData.action === 'toggle_height') {
-            heightMode = (heightMode === 'STANDING') ? 'SEATED' : 'STANDING';
-            applyHeightMode();
           } else if (hitBtn.userData.action === 'select_game') {
             switchNextMiniGame();
           } else if (hitBtn.userData.action === 'toggle_start') {
