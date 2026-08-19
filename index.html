@@ -64,9 +64,6 @@
     let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
     const clock = new THREE.Clock();
 
-    // ==========================================
-    // CLASSE MINIGIOCO 1 (Griglia 3x3)
-    // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -173,9 +170,6 @@
       }
     }
 
-    // ==========================================
-    // CLASSE MINIGIOCO 2 (6 Sfere + Combo dello Stesso Colore)
-    // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -243,7 +237,6 @@
         const colorHex = sphere.userData.colorInfo.hex;
         const basePoints = sphere.userData.colorInfo.points;
 
-        // SISTEMA COMBO: Se lo stesso colore positivo viene colpito di seguito
         if (this.lastColorHex !== null && this.lastColorHex === colorHex && basePoints > 0) {
           this.comboStreak++;
         } else {
@@ -284,7 +277,6 @@
           return;
         }
 
-        // GESTIONE ONDATE (2s VISIBILI / 1s PAUSA)
         this.waveTimer += delta;
         if (this.isWaveActive && this.waveTimer >= 2.0) {
           this.isWaveActive = false;
@@ -454,7 +446,7 @@
       timerTexture.needsUpdate = true;
     }
 
-    // CREAZIONE ANIMAZIONE TESTO FLUTTUANTE "COMBO Xn"
+    // CREAZIONE TESTO COMBO PIÙ PICCOLO (0.4 x 0.2m)
     function createFloatingText(text, position) {
       const canvas = document.createElement('canvas');
       canvas.width = 256;
@@ -462,11 +454,11 @@
       const ctx = canvas.getContext('2d');
 
       ctx.fillStyle = '#ffea00';
-      ctx.font = 'bold 44px Arial';
+      ctx.font = 'bold 30px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 5;
       ctx.strokeText(text, 128, 64);
       ctx.fillText(text, 128, 64);
 
@@ -478,7 +470,7 @@
         side: THREE.DoubleSide
       });
 
-      const geo = new THREE.PlaneGeometry(0.7, 0.35);
+      const geo = new THREE.PlaneGeometry(0.4, 0.2); // Dimensione ridotta
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(position);
 
@@ -499,8 +491,8 @@
           ft.material.dispose();
           floatingTexts.splice(i, 1);
         } else {
-          ft.position.y += 0.6 * delta; // Movimento verso l'alto
-          ft.material.opacity = ft.userData.life / ft.userData.initialLife; // Sfumatura graduale
+          ft.position.y += 0.5 * delta;
+          ft.material.opacity = ft.userData.life / ft.userData.initialLife;
         }
       }
     }
@@ -538,6 +530,34 @@
     function initAudio() {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    // NUOVO SUONO COMBO (ARPEGGIO BRILLANTE)
+    function playComboSound(comboMultiplier) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const baseFreq = 523.25 * Math.min(1 + (comboMultiplier * 0.15), 2.0);
+      const notes = [baseFreq, baseFreq * 1.25, baseFreq * 1.5];
+
+      notes.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const startTime = now + idx * 0.04;
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        gain.gain.setValueAtTime(0.35, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.12);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.12);
+      });
     }
 
     function playBellSound() {
@@ -793,7 +813,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.5.0 (Combo System)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.6.0 (Combo FX & Sound)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
@@ -929,9 +949,10 @@
             playPopSound(hitResult.points < 0, true);
             createExplosion(hit.point, hitColorHex);
 
-            // Generazione animazione "Combo Xn" se il moltiplicatore è > 1
+            // Esecuzione effetto sonoro e animazione grafica per combo > 1
             if (hitResult.combo > 1) {
               createFloatingText("Combo X" + hitResult.combo, hit.point.clone());
+              playComboSound(hitResult.combo);
             }
 
             score += hitResult.points;
