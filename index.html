@@ -40,11 +40,13 @@
     let controllers = [];
     let gunPivots = [];
     let laserLines = [];
-    let bullets = [];
+    let tracers = [];
     let targets = [];
     let hudButtons = [];
     let score = 0;
-    let currentGunPitch = 0;
+    
+    // INCLINAZIONE DI DEFAULT A -15 GRADI
+    let currentGunPitch = THREE.MathUtils.degToRad(-15);
     let laserEnabled = true;
     
     // Web Audio API Context
@@ -92,6 +94,9 @@
       // 7. Setup HUD 3D Nello Spazio VR
       create3DHUD();
 
+      // Applicazione inclinazione iniziale (-15°)
+      updateGunRotation();
+
       // 8. Spawna bersagli vicino al pavimento
       for (let i = 0; i < 8; i++) {
         spawnTarget();
@@ -99,7 +104,7 @@
 
       window.addEventListener('resize', onWindowResize);
 
-      // Inizializza Audio al primo click/interazione
+      // Inizializza Audio al primo click
       window.addEventListener('click', initAudio, { once: true });
 
       // Render Loop per WebXR
@@ -116,13 +121,11 @@
       }
     }
 
-    // Suono di Sparo della Pistola
     function playGunshotSound() {
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
 
-      // Rumore bianco esplosivo
       const bufferSize = audioCtx.sampleRate * 0.12;
       const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -135,7 +138,7 @@
 
       const filter = audioCtx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1200, now);
+      filter.frequency.setValueAtTime(1400, now);
       filter.frequency.exponentialRampToValueAtTime(100, now + 0.12);
 
       const gain = audioCtx.createGain();
@@ -149,7 +152,6 @@
       noise.start(now);
     }
 
-    // Suono Scoppio Bolla
     function playPopSound() {
       initAudio();
       if (!audioCtx) return;
@@ -160,7 +162,7 @@
 
       osc.type = 'sine';
       osc.frequency.setValueAtTime(350, now);
-      osc.frequency.exponentialRampToValueAtTime(1100, now + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
 
       gain.gain.setValueAtTime(0.8, now);
       gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
@@ -178,7 +180,6 @@
       hudGroup.position.set(-1.2, 1.3, -1.8);
       hudGroup.rotation.y = THREE.MathUtils.degToRad(25);
 
-      // Canvas 2D per il testo HUD
       hudCanvas = document.createElement('canvas');
       hudCanvas.width = 512;
       hudCanvas.height = 280;
@@ -187,28 +188,24 @@
       hudTexture = new THREE.CanvasTexture(hudCanvas);
       updateHudTexture();
 
-      // Display Principale
       const panelGeo = new THREE.PlaneGeometry(1.1, 0.6);
       const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
       const panelMesh = new THREE.Mesh(panelGeo, panelMat);
       hudGroup.add(panelMesh);
 
-      // --- PULSANTI 3D SPARABILI IN VR ---
-      // 1. Inclina Avanti
+      // --- PULSANTI 3D SPARABILI ---
       btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.32, 0.14);
       btnPitchDownMesh.position.set(-0.36, -0.42, 0);
       btnPitchDownMesh.userData = { action: 'pitch_down' };
       hudGroup.add(btnPitchDownMesh);
       hudButtons.push(btnPitchDownMesh);
 
-      // 2. Inclina Indietro
       btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.32, 0.14);
       btnPitchUpMesh.position.set(0, -0.42, 0);
       btnPitchUpMesh.userData = { action: 'pitch_up' };
       hudGroup.add(btnPitchUpMesh);
       hudButtons.push(btnPitchUpMesh);
 
-      // 3. Toggle Laser
       btnLaserToggleMesh = create3DButton("Laser: ON", 0.32, 0.14);
       btnLaserToggleMesh.position.set(0.36, -0.42, 0);
       btnLaserToggleMesh.userData = { action: 'toggle_laser' };
@@ -234,7 +231,7 @@
       // Versione
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Versione: v1.5.0', 30, 92);
+      hudCtx.fillText('Versione: v1.6.0', 30, 92);
 
       // Punti
       hudCtx.fillStyle = '#00ffcc';
@@ -384,35 +381,95 @@
       update3DButtonText(btnLaserToggleMesh, laserEnabled ? "Laser: ON" : "Laser: OFF");
     }
 
+    // --- SISTEMA DI COLLISIONE RAYCASTING (HITSCAN) ---
     function onShoot(event) {
       const controller = event.target;
-
-      // Suono dello sparo
       playGunshotSound();
 
-      // Proiettile piccolo (Raggio 0.01)
-      const bulletGeo = new THREE.SphereGeometry(0.01, 8, 8);
-      const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-      const bullet = new THREE.Mesh(bulletGeo, bulletMat);
-
       const pivot = controller.children.find(c => gunPivots.includes(c));
-      
-      if (pivot) {
-        pivot.getWorldPosition(bullet.position);
+      if (!pivot) return;
 
-        const direction = new THREE.Vector3(0, 0, -1);
-        const worldQuaternion = new THREE.Quaternion();
-        pivot.getWorldQuaternion(worldQuaternion);
-        direction.applyQuaternion(worldQuaternion);
+      const raycaster = new THREE.Raycaster();
+      const origin = new THREE.Vector3();
+      const worldQuat = new THREE.Quaternion();
 
-        // Velocità ultra rapida (80 m/s)
-        bullet.userData = {
-          velocity: direction.multiplyScalar(80),
-          life: 0
-        };
+      pivot.getWorldPosition(origin);
+      pivot.getWorldQuaternion(worldQuat);
 
-        scene.add(bullet);
-        bullets.push(bullet);
+      // Direzione del raggio (avanti rispetto alla canna orientata)
+      const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
+
+      raycaster.set(origin, direction);
+
+      // Oggetti con cui verificare l'impatto istantaneo
+      const candidates = [...targets, ...hudButtons];
+      const intersects = raycaster.intersectObjects(candidates, false);
+
+      let endPoint = origin.clone().add(direction.clone().multiplyScalar(25));
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        endPoint = hit.point;
+
+        // Controlla se è stato colpito un pulsante HUD
+        const hitBtn = hudButtons.find(b => b === hit.object);
+        if (hitBtn) {
+          playPopSound();
+          if (hitBtn.userData.action === 'pitch_down') {
+            currentGunPitch += THREE.MathUtils.degToRad(5);
+            updateGunRotation();
+          } else if (hitBtn.userData.action === 'pitch_up') {
+            currentGunPitch -= THREE.MathUtils.degToRad(5);
+            updateGunRotation();
+          } else if (hitBtn.userData.action === 'toggle_laser') {
+            toggleLaser();
+          }
+        } else {
+          // Controlla se è stato colpito un bersaglio
+          const targetIndex = targets.indexOf(hit.object);
+          if (targetIndex !== -1) {
+            playPopSound();
+            scene.remove(hit.object);
+            targets.splice(targetIndex, 1);
+
+            score += 100;
+            updateHudTexture();
+
+            spawnTarget();
+          }
+        }
+      }
+
+      // Crea un tracciante luminoso istantaneo per il feedback visivo dello sparo
+      createTracer(origin, endPoint);
+    }
+
+    // Effetto visivo linea tracciante istantanea
+    function createTracer(start, end) {
+      const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xffff00,
+        transparent: true,
+        opacity: 1.0
+      });
+      const line = new THREE.Line(geo, mat);
+      line.userData = { life: 0.06 }; // Dissolvenza in 60 millisecondi
+      scene.add(line);
+      tracers.push(line);
+    }
+
+    function updateTracers(delta) {
+      for (let i = tracers.length - 1; i >= 0; i--) {
+        const tracer = tracers[i];
+        tracer.userData.life -= delta;
+        if (tracer.userData.life <= 0) {
+          scene.remove(tracer);
+          tracer.geometry.dispose();
+          tracer.material.dispose();
+          tracers.splice(i, 1);
+        } else {
+          tracer.material.opacity = tracer.userData.life / 0.06;
+        }
       }
     }
 
@@ -433,73 +490,6 @@
       targets.push(target);
     }
 
-    function updateBullets(delta) {
-      const step = THREE.MathUtils.degToRad(5);
-
-      for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
-        bullet.position.addScaledVector(bullet.userData.velocity, delta);
-        bullet.userData.life += delta;
-
-        let bulletDestroyed = false;
-
-        // 1. COLLISIONE CON PULSANTI HUD 3D
-        for (let btn of hudButtons) {
-          const btnBox = new THREE.Box3().setFromObject(btn);
-          if (btnBox.containsPoint(bullet.position)) {
-            if (btn.userData.action === 'pitch_down') {
-              currentGunPitch += step;
-              updateGunRotation();
-            } else if (btn.userData.action === 'pitch_up') {
-              currentGunPitch -= step;
-              updateGunRotation();
-            } else if (btn.userData.action === 'toggle_laser') {
-              toggleLaser();
-            }
-
-            playPopSound();
-            scene.remove(bullet);
-            bullets.splice(i, 1);
-            bulletDestroyed = true;
-            break;
-          }
-        }
-
-        if (bulletDestroyed) continue;
-
-        // 2. COLLISIONE CON BERSAGLI A TERRA
-        for (let j = targets.length - 1; j >= 0; j--) {
-          const target = targets[j];
-          const dist = bullet.position.distanceTo(target.position);
-
-          if (dist < 0.20) {
-            playPopSound(); // Suono scoppio bolla
-
-            scene.remove(target);
-            targets.splice(j, 1);
-
-            scene.remove(bullet);
-            bullets.splice(i, 1);
-
-            score += 100;
-            updateHudTexture();
-
-            spawnTarget();
-            bulletDestroyed = true;
-            break;
-          }
-        }
-
-        if (bulletDestroyed) continue;
-
-        // Rimuovi proiettili vecchi
-        if (bullet.userData.life > 1.5 && bullets.includes(bullet)) {
-          scene.remove(bullet);
-          bullets.splice(i, 1);
-        }
-      }
-    }
-
     function onWindowResize() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -514,7 +504,8 @@
         t.rotation.y += 1.0 * delta;
       });
 
-      updateBullets(delta);
+      // Aggiorna dissolvenza traccianti visivi
+      updateTracers(delta);
 
       renderer.render(scene, camera);
     }
