@@ -3,7 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>WebXR Target Shooter</title>
+  
+  <!-- TAG META ANTI-CACHE -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+
+  <title>WebXR Red Gun Target Shooter</title>
   <style>
     body {
       margin: 0;
@@ -16,15 +22,40 @@
       top: 20px;
       left: 20px;
       color: #00ffcc;
-      font-size: 24px;
+      font-size: 20px;
       font-weight: bold;
       text-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
       z-index: 100;
-      pointer-events: none;
+      pointer-events: none; /* Permette al touch/mouse di passare oltre il contenitore */
+    }
+    #hud-controls {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+    }
+    .hud-btn {
+      pointer-events: auto; /* Rende cliccabili i pulsanti dell'HUD */
+      background: rgba(0, 0, 0, 0.6);
+      border: 2px solid #00ffcc;
+      color: #00ffcc;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-shadow: 0 0 5px rgba(0, 255, 204, 0.8);
+    }
+    .hud-btn:hover {
+      background: #00ffcc;
+      color: #000;
+    }
+    .hud-btn:active {
+      transform: scale(0.95);
     }
   </style>
 
-  <!-- Import Map per caricare Three.js ed i moduli WebXR -->
+  <!-- Import Map Three.js via ES Modules -->
   <script type="importmap">
     {
       "imports": {
@@ -36,7 +67,13 @@
 </head>
 <body>
 
-  <div id="ui-overlay">Punti: <span id="score">0</span></div>
+  <div id="ui-overlay">
+    <div>Punti: <span id="score">0</span></div>
+    <div id="hud-controls">
+      <button class="hud-btn" id="btn-pitch-down">Inclina Avanti ⤵</button>
+      <button class="hud-btn" id="btn-pitch-up">Inclina Indietro ⤴</button>
+    </div>
+  </div>
 
   <script type="module">
     import * as THREE from 'three';
@@ -45,9 +82,11 @@
 
     let scene, camera, renderer;
     let controllers = [];
+    let gunPivots = [];
     let bullets = [];
     let targets = [];
     let score = 0;
+    let currentGunPitch = 0; // Angolo di inclinazione corrente in radianti
     const clock = new THREE.Clock();
 
     init();
@@ -69,26 +108,29 @@
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
 
-      // 4. Griglia di riferimento per il pavimento (VR)
-      const grid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x444444);
+      // 4. Griglia Pavimento
+      const grid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x333333);
       grid.position.y = 0;
       scene.add(grid);
 
-      // 5. Renderer WebGL + Abilita WebXR
+      // 5. Renderer WebGL + WebXR
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // 6. Bottoni di ingresso Sessione AR / VR
+      // 6. Bottoni di ingresso VR e AR
       document.body.appendChild(VRButton.createButton(renderer));
       document.body.appendChild(ARButton.createButton(renderer));
 
-      // 7. Setup Controller e Pistole
+      // 7. Setup Controller e Pistola
       setupControllers();
 
-      // 8. Genera i primi bersagli
+      // 8. Eventi Pulsanti HUD per Rotazione Pistola
+      setupHudControls();
+
+      // 9. Spawna bersagli vicino al pavimento
       for (let i = 0; i < 8; i++) {
         spawnTarget();
       }
@@ -99,31 +141,59 @@
       renderer.setAnimationLoop(animate);
     }
 
-    // Creo un modello di pistola Procedurale
-    function createGunModel() {
+    // Creazione Modello Pistola
+    function createRedGunModel() {
       const gunGroup = new THREE.Group();
 
-      // Canna della pistola
-      const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16);
+      const redGunMat = new THREE.MeshStandardMaterial({ 
+        color: 0xe60000, 
+        roughness: 0.2, 
+        metalness: 0.5 
+      });
+      const blackDetailMat = new THREE.MeshStandardMaterial({ 
+        color: 0x111111, 
+        roughness: 0.6 
+      });
+
+      // Canna
+      const barrelGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.26, 16);
       barrelGeo.rotateX(Math.PI / 2);
-      const gunMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.8 });
-      const barrel = new THREE.Mesh(barrelGeo, gunMat);
+      const barrel = new THREE.Mesh(barrelGeo, redGunMat);
       barrel.position.set(0, 0, -0.1);
       gunGroup.add(barrel);
 
       // Impugnatura
       const handleGeo = new THREE.BoxGeometry(0.03, 0.12, 0.04);
-      const handle = new THREE.Mesh(handleGeo, gunMat);
+      const handle = new THREE.Mesh(handleGeo, blackDetailMat);
       handle.position.set(0, -0.05, 0.02);
       handle.rotation.x = -0.3;
       gunGroup.add(handle);
 
-      // Mirino Laser Verde
-      const sightGeo = new THREE.BoxGeometry(0.008, 0.008, 0.01);
-      const sightMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-      const sight = new THREE.Mesh(sightGeo, sightMat);
-      sight.position.set(0, 0.022, -0.2);
-      gunGroup.add(sight);
+      // Mirino Posteriore
+      const rearSightGeo = new THREE.BoxGeometry(0.016, 0.012, 0.005);
+      const rearSight = new THREE.Mesh(rearSightGeo, blackDetailMat);
+      rearSight.position.set(0, 0.025, 0.02);
+      gunGroup.add(rearSight);
+
+      // Mirino Anteriore
+      const frontSightGeo = new THREE.BoxGeometry(0.006, 0.012, 0.006);
+      const frontSightMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+      const frontSight = new THREE.Mesh(frontSightGeo, frontSightMat);
+      frontSight.position.set(0, 0.025, -0.22);
+      gunGroup.add(frontSight);
+
+      // Laser
+      const laserGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, -0.23),
+        new THREE.Vector3(0, 0, -15)
+      ]);
+      const laserMat = new THREE.LineBasicMaterial({ 
+        color: 0xff0000, 
+        transparent: true, 
+        opacity: 0.6 
+      });
+      const laserLine = new THREE.Line(laserGeo, laserMat);
+      gunGroup.add(laserLine);
 
       return gunGroup;
     }
@@ -132,55 +202,82 @@
       for (let i = 0; i < 2; i++) {
         const controller = renderer.xr.getController(i);
 
-        // Aggiunge il modello della pistola al controller
-        const gun = createGunModel();
-        controller.add(gun);
+        // Creiamo un gruppo Pivot per gestire la rotazione dinamica
+        const pivot = new THREE.Group();
+        const gun = createRedGunModel();
+        
+        pivot.add(gun);
+        controller.add(pivot);
 
-        // Evento sparo al grilletto (Select)
         controller.addEventListener('selectstart', onShoot);
 
         scene.add(controller);
         controllers.push(controller);
+        gunPivots.push(pivot);
       }
+    }
+
+    function setupHudControls() {
+      const step = THREE.MathUtils.degToRad(5); // Inclinazione di 5 gradi a ogni click
+
+      document.getElementById('btn-pitch-down').addEventListener('click', () => {
+        currentGunPitch += step; // Ruota in avanti (verso il basso)
+        updateGunRotation();
+      });
+
+      document.getElementById('btn-pitch-up').addEventListener('click', () => {
+        currentGunPitch -= step; // Ruota indietro (verso l'alto)
+        updateGunRotation();
+      });
+    }
+
+    function updateGunRotation() {
+      gunPivots.forEach(pivot => {
+        pivot.rotation.x = currentGunPitch;
+      });
     }
 
     function onShoot(event) {
       const controller = event.target;
 
-      // Creo il proiettile
-      const bulletGeo = new THREE.SphereGeometry(0.02, 8, 8);
-      const bulletMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+      const bulletGeo = new THREE.SphereGeometry(0.025, 8, 8);
+      const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
       const bullet = new THREE.Mesh(bulletGeo, bulletMat);
 
-      // Posiziona il proiettile sulla punta della pistola
-      controller.getWorldPosition(bullet.position);
+      // Calcola posizione di sparo considerando l'orientamento attuale della pistola
+      const pivot = controller.children.find(c => gunPivots.includes(c));
+      
+      if (pivot) {
+        pivot.getWorldPosition(bullet.position);
 
-      // Calcola la direzione (-Z rispetto al controller)
-      const direction = new THREE.Vector3(0, 0, -1);
-      direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+        // Ricava la direzione in avanti (-Z) inclusa la rotazione custom applicata al pivot
+        const direction = new THREE.Vector3(0, 0, -1);
+        const worldQuaternion = new THREE.Quaternion();
+        pivot.getWorldQuaternion(worldQuaternion);
+        direction.applyQuaternion(worldQuaternion);
 
-      bullet.userData = {
-        velocity: direction.multiplyScalar(15), // Velocità del proiettile
-        life: 0
-      };
+        bullet.userData = {
+          velocity: direction.multiplyScalar(18),
+          life: 0
+        };
 
-      scene.add(bullet);
-      bullets.push(bullet);
+        scene.add(bullet);
+        bullets.push(bullet);
+      }
     }
 
     function spawnTarget() {
-      const geo = new THREE.IcosahedronGeometry(0.2, 1);
+      const geo = new THREE.IcosahedronGeometry(0.18, 1);
       const mat = new THREE.MeshStandardMaterial({
         color: Math.random() * 0xffffff,
         roughness: 0.2,
-        metalness: 0.6
+        metalness: 0.7
       });
       const target = new THREE.Mesh(geo, mat);
 
-      // Posizionamento casuale davanti al giocatore
       target.position.x = (Math.random() - 0.5) * 4;
-      target.position.y = 1 + Math.random() * 1.5;
-      target.position.z = -2 - Math.random() * 3;
+      target.position.y = 0.15 + Math.random() * 0.3; 
+      target.position.z = -1.5 - Math.random() * 3;
 
       scene.add(target);
       targets.push(target);
@@ -192,12 +289,11 @@
         bullet.position.addScaledVector(bullet.userData.velocity, delta);
         bullet.userData.life += delta;
 
-        // Collisioni con i bersagli
         for (let j = targets.length - 1; j >= 0; j--) {
           const target = targets[j];
           const dist = bullet.position.distanceTo(target.position);
 
-          if (dist < 0.22) { // Impatto avvenuto
+          if (dist < 0.22) {
             scene.remove(target);
             targets.splice(j, 1);
 
@@ -207,13 +303,12 @@
             score += 100;
             document.getElementById('score').textContent = score;
 
-            spawnTarget(); // Rigenera bersaglio
+            spawnTarget();
             break;
           }
         }
 
-        // Rimuovi proiettili vecchi dopo 3 secondi
-        if (bullet.userData.life > 3 && bullets.includes(bullet)) {
+        if (bullet.userData.life > 2.5 && bullets.includes(bullet)) {
           scene.remove(bullet);
           bullets.splice(i, 1);
         }
@@ -229,13 +324,11 @@
     function animate() {
       const delta = clock.getDelta();
 
-      // Rotazione bersagli
       targets.forEach(t => {
-        t.rotation.x += 0.6 * delta;
-        t.rotation.y += 0.8 * delta;
+        t.rotation.x += 0.8 * delta;
+        t.rotation.y += 1.0 * delta;
       });
 
-      // Aggiornamento posizioni e collisioni
       updateBullets(delta);
 
       renderer.render(scene, camera);
