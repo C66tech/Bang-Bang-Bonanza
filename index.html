@@ -44,13 +44,14 @@
     let hudButtons = [];
     let score = 0;
     
-    // INCLINAZIONE DEFAULT -15°
-    let currentGunPitch = THREE.MathUtils.degToRad(-15);
+    // INCLINAZIONE DEFAULT A -14 DEGREES
+    let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
     
     // Gestione Minigiochi
     let activeMiniGame = null;
-    let currentMiniGameName = "Minigioco 1";
+    let miniGameList = [];
+    let currentMiniGameIndex = 0;
 
     // Web Audio API Context
     let audioCtx = null;
@@ -112,8 +113,7 @@
 
             sphere.userData = {
               colorInfo: randomColor,
-              active: true,
-              respawnTimer: 0
+              active: true
             };
 
             this.scene.add(sphere);
@@ -128,12 +128,12 @@
       }
 
       getTargetObjects() {
-        return this.spheres.filter(s => s.userData.active);
+        return this.spheres.filter(s => s.userData.active && s.visible);
       }
 
       onHit(hitObject) {
         const sphere = this.spheres.find(s => s === hitObject);
-        if (!sphere || !sphere.userData.active) return 0;
+        if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
 
         const points = sphere.userData.colorInfo.points;
 
@@ -155,7 +155,126 @@
 
       update(delta) {
         this.spheres.forEach(s => {
-          if (s.userData.active) {
+          if (s.userData.active && s.visible) {
+            s.rotation.y += 0.8 * delta;
+          }
+        });
+      }
+
+      cleanup() {
+        this.spheres.forEach(s => {
+          this.scene.remove(s);
+          s.geometry.dispose();
+          s.material.dispose();
+        });
+        this.spheres = [];
+      }
+    }
+
+    // ==========================================
+    // CLASSE MINIGIOCO 2 (5 Sfere 1 Riga + Timer 5s)
+    // ==========================================
+    class MiniGame2 {
+      constructor(sceneRef) {
+        this.scene = sceneRef;
+        this.name = "Minigioco 2";
+        this.spheres = [];
+        this.timer = 0;
+        this.isWaveActive = true;
+        this.colorPalette = [
+          { name: 'Giallo', hex: 0xffff00, points: 100 },
+          { name: 'Verde',  hex: 0x00ff00, points: 100 },
+          { name: 'Rosso',  hex: 0xff0000, points: 100 },
+          { name: 'Blu',    hex: 0x0066ff, points: 100 },
+          { name: 'Arancio',hex: 0xff8800, points: 100 },
+          { name: 'Viola',  hex: 0x9900ff, points: 100 },
+          { name: 'Nero',   hex: 0x111111, points: -100 }
+        ];
+      }
+
+      init() {
+        this.cleanup();
+        this.timer = 0;
+        this.isWaveActive = true;
+
+        const count = 5;
+        const spacingX = 0.55;
+        const startX = -((count - 1) * spacingX) / 2;
+        const posY = 0.35;
+        const posZ = -2.5;
+
+        const geo = new THREE.SphereGeometry(0.16, 24, 24);
+
+        for (let i = 0; i < count; i++) {
+          const colorObj = this.getRandomColorObj();
+
+          const mat = new THREE.MeshStandardMaterial({
+            color: colorObj.hex,
+            roughness: 0.2,
+            metalness: 0.5
+          });
+
+          const sphere = new THREE.Mesh(geo, mat);
+          sphere.position.set(startX + i * spacingX, posY, posZ);
+
+          sphere.userData = {
+            colorInfo: colorObj,
+            active: true
+          };
+
+          this.scene.add(sphere);
+          this.spheres.push(sphere);
+        }
+      }
+
+      getRandomColorObj() {
+        const idx = Math.floor(Math.random() * this.colorPalette.length);
+        return this.colorPalette[idx];
+      }
+
+      getTargetObjects() {
+        return this.spheres.filter(s => s.userData.active && s.visible);
+      }
+
+      onHit(hitObject) {
+        const sphere = this.spheres.find(s => s === hitObject);
+        if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
+
+        const points = sphere.userData.colorInfo.points;
+
+        sphere.userData.active = false;
+        sphere.visible = false;
+
+        return points;
+      }
+
+      update(delta) {
+        this.timer += delta;
+
+        // Allo scadere di 5 secondi scompaiono tutte le sfere
+        if (this.isWaveActive && this.timer >= 5.0) {
+          this.isWaveActive = false;
+          this.spheres.forEach(s => {
+            s.userData.active = false;
+            s.visible = false;
+          });
+        } 
+        // Dopo 1 secondo di assenza (totale 6s), riappaiono tutte con nuovi colori casuali
+        else if (!this.isWaveActive && this.timer >= 6.0) {
+          this.timer = 0;
+          this.isWaveActive = true;
+
+          this.spheres.forEach(s => {
+            const newColor = this.getRandomColorObj();
+            s.userData.colorInfo = newColor;
+            s.material.color.setHex(newColor.hex);
+            s.userData.active = true;
+            s.visible = true;
+          });
+        }
+
+        this.spheres.forEach(s => {
+          if (s.visible) {
             s.rotation.y += 0.8 * delta;
           }
         });
@@ -213,18 +332,37 @@
       // 8. Schermata di Presentazione / Logo Trasparente
       createPresentationLogo();
 
-      // Applicazione inclinazione iniziale (-15°)
+      // Applicazione inclinazione iniziale (-14°)
       updateGunRotation();
 
-      // 9. Avvio Minigioco 1
-      activeMiniGame = new MiniGame1(scene);
-      activeMiniGame.init();
+      // 9. Registro e Avvio Minigiochi
+      miniGameList = [MiniGame1, MiniGame2];
+      currentMiniGameIndex = 0;
+      loadMiniGame(currentMiniGameIndex);
 
       window.addEventListener('resize', onWindowResize);
       window.addEventListener('click', initAudio, { once: true });
 
       // Render Loop per WebXR
       renderer.setAnimationLoop(animate);
+    }
+
+    function loadMiniGame(index) {
+      if (activeMiniGame) {
+        activeMiniGame.cleanup();
+      }
+      activeMiniGame = new miniGameList[index](scene);
+      activeMiniGame.init();
+      score = 0;
+      updateHudTexture();
+      if (btnGameSelectMesh) {
+        update3DButtonText(btnGameSelectMesh, "Modalità: " + activeMiniGame.name);
+      }
+    }
+
+    function switchNextMiniGame() {
+      currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
+      loadMiniGame(currentMiniGameIndex);
     }
 
     // --- SCHERMATA DI PRESENTAZIONE (LOGO CON TRASPARENZA PNG) ---
@@ -234,17 +372,15 @@
       const logoTexture = textureLoader.load('logo.png');
       logoTexture.colorSpace = THREE.SRGBColorSpace;
 
-      // Quadro di presentazione 3D
       const logoGeo = new THREE.PlaneGeometry(2.0, 1.0);
       const logoMat = new THREE.MeshBasicMaterial({
         map: logoTexture,
-        transparent: true,  // Abilita la trasparenza del PNG
-        alphaTest: 0.05,    // Trasparenza netta dove il PNG è vuoto
+        transparent: true,
+        alphaTest: 0.05,
         side: THREE.DoubleSide
       });
 
       const logoMesh = new THREE.Mesh(logoGeo, logoMat);
-      // Posizionato al centro in alto davanti al giocatore
       logoMesh.position.set(0, 2.1, -2.5);
       scene.add(logoMesh);
     }
@@ -380,12 +516,12 @@
       // Versione
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Versione: v1.8.0', 28, 85);
+      hudCtx.fillText('Versione: v1.9.0', 28, 85);
 
       // Modalità Corrente
       hudCtx.fillStyle = '#00ffcc';
       hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Gioco: ' + currentMiniGameName, 28, 125);
+      hudCtx.fillText('Gioco: ' + (activeMiniGame ? activeMiniGame.name : 'Minigioco 1'), 28, 125);
 
       // Punti
       hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d';
@@ -567,18 +703,17 @@
         if (hitBtn) {
           playPopSound(false);
 
+          // VARIAZIONE DI 1 GRADO ALLA VOLTA
           if (hitBtn.userData.action === 'pitch_down') {
-            currentGunPitch += THREE.MathUtils.degToRad(5);
+            currentGunPitch += THREE.MathUtils.degToRad(1);
             updateGunRotation();
           } else if (hitBtn.userData.action === 'pitch_up') {
-            currentGunPitch -= THREE.MathUtils.degToRad(5);
+            currentGunPitch -= THREE.MathUtils.degToRad(1);
             updateGunRotation();
           } else if (hitBtn.userData.action === 'toggle_laser') {
             toggleLaser();
           } else if (hitBtn.userData.action === 'select_game') {
-            if (activeMiniGame) activeMiniGame.init();
-            score = 0;
-            updateHudTexture();
+            switchNextMiniGame();
           }
         } else if (activeMiniGame) {
           const pointsEarned = activeMiniGame.onHit(hit.object);
