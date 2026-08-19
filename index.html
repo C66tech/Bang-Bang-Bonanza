@@ -45,6 +45,9 @@
     let hudButtons = [];
     let score = 0;
     
+    // STATO DEL GIOCO: 'LOBBY' (Presentazione) oppure 'PLAYING' (In gioco)
+    let gameState = 'LOBBY';
+
     // INCLINAZIONE DEFAULT -14°
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
@@ -59,7 +62,10 @@
 
     // Elementi HUD 3D
     let hudCanvas, hudCtx, hudTexture;
-    let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh;
+    let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
+
+    // Logo Mesh
+    let logoMesh = null;
 
     const clock = new THREE.Clock();
 
@@ -142,7 +148,7 @@
         sphere.visible = false;
 
         setTimeout(() => {
-          if (this.spheres.includes(sphere)) {
+          if (this.spheres.includes(sphere) && gameState === 'PLAYING') {
             const newColor = this.getRandomColorObj();
             sphere.userData.colorInfo = newColor;
             sphere.material.color.setHex(newColor.hex);
@@ -297,6 +303,8 @@
     function init() {
       // 1. Scena 3D
       scene = new THREE.Scene();
+      
+      // Di default sfondo scuro in 3D/Desktop. Verrà annullato automaticamente in AR.
       scene.background = new THREE.Color(0x0c0f1d);
 
       // 2. Camera
@@ -319,6 +327,19 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
+      // --- CORREZIONE AR PASSTHROUGH (SFONDO TRASPARENTE IN AR) ---
+      renderer.xr.addEventListener('sessionstart', () => {
+        const session = renderer.xr.getSession();
+        // Se la sessione è AR, rimuoviamo lo sfondo solido per vedere il mondo reale
+        if (session.environmentBlendMode === 'additive' || session.environmentBlendMode === 'alpha-blend') {
+          scene.background = null;
+        }
+      });
+
+      renderer.xr.addEventListener('sessionend', () => {
+        scene.background = new THREE.Color(0x0c0f1d);
+      });
+
       // Controlli per anteprima Desktop (Mouse)
       controls = new OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.2, -2.5);
@@ -328,74 +349,102 @@
       document.body.appendChild(VRButton.createButton(renderer));
       document.body.appendChild(ARButton.createButton(renderer));
 
-      // 6. Setup Controller e Pistola
+      // 6. Setup Controller e Pistole
       setupControllers();
 
       // 7. Setup HUD 3D Posizionato a Livello Testa
       create3DHUD();
 
-      // 8. Schermata di Presentazione / Logo (con Fallback Sicuro)
+      // 8. Schermata di Presentazione / Logo (con Aspect Ratio Corretto)
       createPresentationLogo();
 
       // Applicazione inclinazione iniziale (-14°)
       updateGunRotation();
 
-      // 9. Registro e Avvio Minigiochi
+      // 9. Registro Minigiochi
       miniGameList = [MiniGame1, MiniGame2];
       currentMiniGameIndex = 0;
-      loadMiniGame(currentMiniGameIndex);
+
+      // Inizialmente siamo in LOBBY (nessun minigioco attivo)
+      gameState = 'LOBBY';
+      updateHudTexture();
 
       window.addEventListener('resize', onWindowResize);
       window.addEventListener('click', initAudio, { once: true });
+
+      // Supporto sparo con Mouse su Desktop (fuori dalla sessione XR)
+      window.addEventListener('pointerdown', onDesktopShoot);
 
       // Render Loop per WebXR
       renderer.setAnimationLoop(animate);
     }
 
-    function loadMiniGame(index) {
+    function startSelectedGame() {
       if (activeMiniGame) {
         activeMiniGame.cleanup();
       }
-      activeMiniGame = new miniGameList[index](scene);
-      activeMiniGame.init();
+      gameState = 'PLAYING';
       score = 0;
+      activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
+      activeMiniGame.init();
+      
       updateHudTexture();
-      if (btnGameSelectMesh) {
-        update3DButtonText(btnGameSelectMesh, "Modalità: " + activeMiniGame.name);
+      update3DButtonText(btnStartMesh, "⏹ STOP GIOCO", "#ff2a6d");
+    }
+
+    function stopCurrentGame() {
+      if (activeMiniGame) {
+        activeMiniGame.cleanup();
+        activeMiniGame = null;
       }
+      gameState = 'LOBBY';
+      updateHudTexture();
+      update3DButtonText(btnStartMesh, "▶ START GIOCO", "#00ffcc");
     }
 
     function switchNextMiniGame() {
       currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
-      loadMiniGame(currentMiniGameIndex);
+      
+      if (gameState === 'PLAYING') {
+        startSelectedGame();
+      } else {
+        updateHudTexture();
+      }
     }
 
-    // --- PRESENTAZIONE LOGO CON FALLBACK ANTIERRORE ---
+    // --- LOGO CON CALCOLO DINAMICO DELL'ASPECT RATIO ---
     function createPresentationLogo() {
-      const logoGeo = new THREE.PlaneGeometry(2.2, 1.1);
+      const logoGeo = new THREE.PlaneGeometry(1, 1);
       const logoMat = new THREE.MeshBasicMaterial({
         transparent: true,
         alphaTest: 0.05,
         side: THREE.DoubleSide
       });
 
-      const logoMesh = new THREE.Mesh(logoGeo, logoMat);
+      logoMesh = new THREE.Mesh(logoGeo, logoMat);
       logoMesh.position.set(0, 2.15, -2.5);
       scene.add(logoMesh);
 
-      // Carica logo.png con gestione di errore/fallback
       const textureLoader = new THREE.TextureLoader();
       textureLoader.load(
         'logo.png',
         (texture) => {
           texture.colorSpace = THREE.SRGBColorSpace;
           logoMat.map = texture;
+
+          // Mantiene l'Aspect Ratio esatto dell'immagine caricata
+          const imgWidth = texture.image.width;
+          const imgHeight = texture.image.height;
+          const aspectRatio = imgWidth / imgHeight;
+
+          const targetHeight = 0.9;
+          logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
           logoMat.needsUpdate = true;
         },
         undefined,
         () => {
-          // Se logo.png non esiste o è bloccato da CORS, crea una grafica Canvas di riserva
-          console.warn("logo.png non trovato. Generazione logo dinamico di riserva.");
+          // Fallback se logo.png non è presente
+          console.warn("logo.png non trovato. Generazione logo di riserva.");
           const canvas = document.createElement('canvas');
           canvas.width = 512;
           canvas.height = 256;
@@ -419,6 +468,7 @@
 
           const fallbackTexture = new THREE.CanvasTexture(canvas);
           logoMat.map = fallbackTexture;
+          logoMesh.scale.set(1.8, 0.9, 1);
           logoMat.needsUpdate = true;
         }
       );
@@ -492,7 +542,7 @@
       osc.stop(now + 0.12);
     }
 
-    // --- CREAZIONE HUD 3D A LIVELLO DELLA TESTA ---
+    // --- CREAZIONE HUD 3D A LIVELLO DELLA TESTA CON PULSANTE START ---
     function create3DHUD() {
       const hudGroup = new THREE.Group();
       hudGroup.position.set(-1.1, 1.45, -1.6);
@@ -500,78 +550,98 @@
 
       hudCanvas = document.createElement('canvas');
       hudCanvas.width = 512;
-      hudCanvas.height = 300;
+      hudCanvas.height = 340;
       hudCtx = hudCanvas.getContext('2d');
 
       hudTexture = new THREE.CanvasTexture(hudCanvas);
       updateHudTexture();
 
-      const panelGeo = new THREE.PlaneGeometry(1.0, 0.6);
+      const panelGeo = new THREE.PlaneGeometry(1.0, 0.68);
       const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
       const panelMesh = new THREE.Mesh(panelGeo, panelMat);
       hudGroup.add(panelMesh);
 
       // --- PULSANTI 3D SPARABILI ---
-      btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.28, 0.12);
-      btnPitchDownMesh.position.set(-0.33, -0.42, 0);
+      // 1. Inclina Avanti (+1°)
+      btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.28, 0.11);
+      btnPitchDownMesh.position.set(-0.33, -0.46, 0);
       btnPitchDownMesh.userData = { action: 'pitch_down' };
       hudGroup.add(btnPitchDownMesh);
       hudButtons.push(btnPitchDownMesh);
 
-      btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.28, 0.12);
-      btnPitchUpMesh.position.set(-0.02, -0.42, 0);
+      // 2. Inclina Indietro (-1°)
+      btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.28, 0.11);
+      btnPitchUpMesh.position.set(-0.02, -0.46, 0);
       btnPitchUpMesh.userData = { action: 'pitch_up' };
       hudGroup.add(btnPitchUpMesh);
       hudButtons.push(btnPitchUpMesh);
 
-      btnLaserToggleMesh = create3DButton("Laser: ON", 0.28, 0.12);
-      btnLaserToggleMesh.position.set(0.29, -0.42, 0);
+      // 3. Toggle Laser
+      btnLaserToggleMesh = create3DButton("Laser: ON", 0.28, 0.11);
+      btnLaserToggleMesh.position.set(0.29, -0.46, 0);
       btnLaserToggleMesh.userData = { action: 'toggle_laser' };
       hudGroup.add(btnLaserToggleMesh);
       hudButtons.push(btnLaserToggleMesh);
 
-      btnGameSelectMesh = create3DButton("Modalità: Minigioco 1", 0.90, 0.12);
-      btnGameSelectMesh.position.set(-0.02, -0.57, 0);
+      // 4. Cambia Minigioco
+      btnGameSelectMesh = create3DButton("Cambia Gioco 🔄", 0.43, 0.11);
+      btnGameSelectMesh.position.set(-0.25, -0.60, 0);
       btnGameSelectMesh.userData = { action: 'select_game' };
       hudGroup.add(btnGameSelectMesh);
       hudButtons.push(btnGameSelectMesh);
+
+      // 5. PULSANTE START GIOCO
+      btnStartMesh = create3DButton("▶ START GIOCO", 0.43, 0.11, "#00ffcc");
+      btnStartMesh.position.set(0.21, -0.60, 0);
+      btnStartMesh.userData = { action: 'toggle_start' };
+      hudGroup.add(btnStartMesh);
+      hudButtons.push(btnStartMesh);
 
       scene.add(hudGroup);
     }
 
     function updateHudTexture() {
       hudCtx.fillStyle = '#0a0f1e';
-      hudCtx.fillRect(0, 0, 512, 300);
+      hudCtx.fillRect(0, 0, 512, 340);
 
       hudCtx.strokeStyle = '#00ffcc';
       hudCtx.lineWidth = 8;
-      hudCtx.strokeRect(4, 4, 504, 292);
+      hudCtx.strokeRect(4, 4, 504, 332);
 
       hudCtx.fillStyle = '#ff2a6d';
       hudCtx.font = 'bold 26px Arial';
       hudCtx.fillText('BANG BANG BONANZA', 28, 45);
 
       hudCtx.fillStyle = '#ffffff';
-      hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Versione: v2.0.0', 28, 85);
+      hudCtx.font = 'bold 18px Arial';
+      hudCtx.fillText('Versione: v2.1.0', 28, 80);
 
+      // Stato del gioco
+      hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703';
+      hudCtx.font = 'bold 20px Arial';
+      hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE (LOBBY)'), 28, 115);
+
+      // Minigioco Selezionato
+      const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
       hudCtx.fillStyle = '#00ffcc';
       hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Gioco: ' + (activeMiniGame ? activeMiniGame.name : 'Minigioco 1'), 28, 125);
+      hudCtx.fillText('Gioco: ' + selectedName, 28, 155);
 
+      // Punti
       hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d';
       hudCtx.font = 'bold 32px Arial';
-      hudCtx.fillText('Punti: ' + score, 28, 185);
+      hudCtx.fillText('Punti: ' + score, 28, 220);
 
+      // Inclinazione
       const degPitch = Math.round(THREE.MathUtils.radToDeg(currentGunPitch));
       hudCtx.fillStyle = '#ffb703';
       hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Inclinazione: ' + degPitch + '°', 28, 240);
+      hudCtx.fillText('Inclinazione: ' + degPitch + '°', 28, 275);
 
       hudTexture.needsUpdate = true;
     }
 
-    function create3DButton(label, width, height) {
+    function create3DButton(label, width, height, strokeColor = '#00ffcc') {
       const btnCanvas = document.createElement('canvas');
       btnCanvas.width = 300;
       btnCanvas.height = 100;
@@ -579,11 +649,11 @@
 
       ctx.fillStyle = '#0d222a';
       ctx.fillRect(0, 0, 300, 100);
-      ctx.strokeStyle = '#00ffcc';
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 6;
       ctx.strokeRect(4, 4, 292, 92);
 
-      ctx.fillStyle = '#00ffcc';
+      ctx.fillStyle = strokeColor;
       ctx.font = 'bold 22px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -598,15 +668,15 @@
       return mesh;
     }
 
-    function update3DButtonText(btnMesh, label) {
+    function update3DButtonText(btnMesh, label, colorHex = '#00ffcc') {
       const ctx = btnMesh.userData.ctx;
       ctx.fillStyle = '#0d222a';
       ctx.fillRect(0, 0, 300, 100);
-      ctx.strokeStyle = laserEnabled ? '#00ffcc' : '#ff2a6d';
+      ctx.strokeStyle = colorHex;
       ctx.lineWidth = 6;
       ctx.strokeRect(4, 4, 292, 92);
 
-      ctx.fillStyle = laserEnabled ? '#00ffcc' : '#ff2a6d';
+      ctx.fillStyle = colorHex;
       ctx.font = 'bold 22px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -615,7 +685,7 @@
       btnMesh.userData.texture.needsUpdate = true;
     }
 
-    // MODELLO PISTOLA ROSSA CON MIRINO AD ANELLO
+    // MODELLO PISTOLA ROSSA CON MIRINO AD ANELLO (GHOST RING)
     function createRedGunModel() {
       const gunGroup = new THREE.Group();
 
@@ -684,7 +754,7 @@
         pivot.add(gun);
         controller.add(pivot);
 
-        controller.addEventListener('selectstart', onShoot);
+        controller.addEventListener('selectstart', onXRShoot);
 
         scene.add(controller);
         controllers.push(controller);
@@ -705,15 +775,12 @@
       update3DButtonText(btnLaserToggleMesh, laserEnabled ? "Laser: ON" : "Laser: OFF");
     }
 
-    // --- SISTEMA DI COLLISIONE RAYCASTING (HITSCAN) ---
-    function onShoot(event) {
+    // --- SPARO DA CONTROLLER XR ---
+    function onXRShoot(event) {
       const controller = event.target;
-      playGunshotSound();
-
       const pivot = controller.children.find(c => gunPivots.includes(c));
       if (!pivot) return;
 
-      const raycaster = new THREE.Raycaster();
       const origin = new THREE.Vector3();
       const worldQuat = new THREE.Quaternion();
 
@@ -721,9 +788,30 @@
       pivot.getWorldQuaternion(worldQuat);
 
       const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat);
-      raycaster.set(origin, direction);
+      processShot(origin, direction);
+    }
 
-      const gameTargets = activeMiniGame ? activeMiniGame.getTargetObjects() : [];
+    // --- SPARO DA DESKTOP (MOUSE CLICK FUORI DA XR) ---
+    function onDesktopShoot(event) {
+      if (renderer.xr.isPresenting) return; // Disabilita se già in sessione XR
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2(
+        (event.clientX / window.innerWidth) * 2 - 1,
+        -(event.clientY / window.innerHeight) * 2 + 1
+      );
+
+      raycaster.setFromCamera(mouse, camera);
+      processShot(raycaster.ray.origin, raycaster.ray.direction);
+    }
+
+    // --- ELABORAZIONE COLPO E COLLISIONI (HITSCAN) ---
+    function processShot(origin, direction) {
+      playGunshotSound();
+
+      const raycaster = new THREE.Raycaster(origin, direction);
+
+      const gameTargets = (activeMiniGame && gameState === 'PLAYING') ? activeMiniGame.getTargetObjects() : [];
       const candidates = [...gameTargets, ...hudButtons];
 
       const intersects = raycaster.intersectObjects(candidates, false);
@@ -747,8 +835,14 @@
             toggleLaser();
           } else if (hitBtn.userData.action === 'select_game') {
             switchNextMiniGame();
+          } else if (hitBtn.userData.action === 'toggle_start') {
+            if (gameState === 'LOBBY') {
+              startSelectedGame();
+            } else {
+              stopCurrentGame();
+            }
           }
-        } else if (activeMiniGame) {
+        } else if (activeMiniGame && gameState === 'PLAYING') {
           const pointsEarned = activeMiniGame.onHit(hit.object);
           if (pointsEarned !== 0) {
             playPopSound(pointsEarned < 0);
@@ -798,7 +892,7 @@
     function animate() {
       const delta = clock.getDelta();
 
-      if (activeMiniGame) {
+      if (activeMiniGame && gameState === 'PLAYING') {
         activeMiniGame.update(delta);
       }
 
