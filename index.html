@@ -51,7 +51,7 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     let scene, camera, renderer, controls, floorWireframe;
-    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [];
+    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [];
     let score = 0;
     let gameState = 'LOBBY';
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
@@ -158,7 +158,7 @@
         this.cleanup();
         this.timer = 0;
         this.isWaveActive = true;
-        const count = 5, spacingX = 0.45;
+        const count = 6, spacingX = 0.40;
         const startX = -((count - 1) * spacingX) / 2;
         const posY = 0.90, posZ = -2.2;
         const geo = new THREE.SphereGeometry(0.14, 24, 24);
@@ -193,10 +193,11 @@
 
       update(delta) {
         this.timer += delta;
-        if (this.isWaveActive && this.timer >= 5.0) {
+        if (this.isWaveActive && this.timer >= 2.0) {
           this.isWaveActive = false;
           this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
-        } else if (!this.isWaveActive && this.timer >= 6.0) {
+          playDullSound(1.0);
+        } else if (!this.isWaveActive && this.timer >= 3.0) {
           this.timer = 0;
           this.isWaveActive = true;
           this.spheres.forEach(s => {
@@ -246,10 +247,8 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // GESTIONE STANDARD WEBXR PER LOCAL-FLOOR
       renderer.xr.addEventListener('sessionstart', async () => {
         const session = renderer.xr.getSession();
-        
         try {
           const refSpace = await session.requestReferenceSpace('local-floor');
           renderer.xr.setReferenceSpace(refSpace);
@@ -277,9 +276,7 @@
       document.body.appendChild(xrContainer);
 
       const vrButton = VRButton.createButton(renderer);
-      const arButton = ARButton.createButton(renderer, {
-        requiredFeatures: ['local-floor']
-      });
+      const arButton = ARButton.createButton(renderer, { requiredFeatures: ['local-floor'] });
 
       xrContainer.appendChild(vrButton);
       xrContainer.appendChild(arButton);
@@ -361,46 +358,173 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
+    // SUONO PISTOLA REALISTICO (DURATA 0.35s CON SUB-BASS E RIVERBERO)
     function playGunshotSound() {
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
-      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.12, audioCtx.sampleRate);
+      const duration = 0.35;
+
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
 
       const noise = audioCtx.createBufferSource();
       noise.buffer = buffer;
+
       const filter = audioCtx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1400, now);
-      filter.frequency.exponentialRampToValueAtTime(100, now + 0.12);
+      filter.frequency.setValueAtTime(2800, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + duration);
+
       const gain = audioCtx.createGain();
       gain.gain.setValueAtTime(1.0, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      const subOsc = audioCtx.createOscillator();
+      const subGain = audioCtx.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(130, now);
+      subOsc.frequency.exponentialRampToValueAtTime(35, now + 0.18);
+      subGain.gain.setValueAtTime(0.8, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      subOsc.connect(subGain); subGain.connect(audioCtx.destination);
+      subOsc.start(now); subOsc.stop(now + 0.18);
 
       noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
       noise.start(now);
     }
 
-    function playPopSound(isNegative = false) {
+    // SUONO SCOPPIO + PLOP PER LA SFERA
+    function playPopSound(isNegative = false, isTargetExplosion = false) {
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
+
+      // Componente tonale (Plop)
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
       if (isNegative) {
         osc.frequency.setValueAtTime(250, now);
-        osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+        osc.frequency.exponentialRampToValueAtTime(70, now + 0.15);
       } else {
-        osc.frequency.setValueAtTime(350, now);
-        osc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(1100, now + 0.08);
       }
-      gain.gain.setValueAtTime(0.8, now);
+      gain.gain.setValueAtTime(0.7, now);
       gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
       osc.connect(gain); gain.connect(audioCtx.destination);
       osc.start(now); osc.stop(now + 0.12);
+
+      // Componente di rumore (Scoppio/Crack ad aria)
+      if (isTargetExplosion) {
+        const burstDuration = 0.12;
+        const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * burstDuration, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(900, now);
+        filter.Q.setValueAtTime(1.2, now);
+
+        const burstGain = audioCtx.createGain();
+        burstGain.gain.setValueAtTime(0.85, now);
+        burstGain.gain.exponentialRampToValueAtTime(0.01, now + burstDuration);
+
+        noise.connect(filter); filter.connect(burstGain); burstGain.connect(audioCtx.destination);
+        noise.start(now);
+      }
+    }
+
+    function playDullSound(duration = 1.0) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const filter = audioCtx.createBiquadFilter();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(90, now);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(180, now);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.05);
+      gain.gain.setValueAtTime(0.35, now + duration - 0.05);
+      gain.gain.linearRampToValueAtTime(0.001, now + duration);
+
+      osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + duration);
+    }
+
+    // ANIMAZIONE DI ESPLOSIONE PARTICELLE COLPIRE
+    function createExplosion(position, colorHex) {
+      const count = 30;
+      const geo = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = position.x;
+        positions[i * 3 + 1] = position.y;
+        positions[i * 3 + 2] = position.z;
+
+        const dir = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2
+        ).normalize().multiplyScalar(1.2 + Math.random() * 2.0);
+
+        velocities.push(dir);
+      }
+
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({
+        color: colorHex,
+        size: 0.04,
+        transparent: true,
+        opacity: 1.0
+      });
+
+      const pSystem = new THREE.Points(geo, mat);
+      pSystem.userData = { velocities: velocities, life: 0.4 };
+      scene.add(pSystem);
+      explosions.push(pSystem);
+    }
+
+    function updateExplosions(delta) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const exp = explosions[i];
+        exp.userData.life -= delta;
+
+        if (exp.userData.life <= 0) {
+          scene.remove(exp);
+          exp.geometry.dispose();
+          exp.material.dispose();
+          explosions.splice(i, 1);
+        } else {
+          const posAttr = exp.geometry.attributes.position;
+          const posArray = posAttr.array;
+          const vels = exp.userData.velocities;
+
+          for (let j = 0; j < vels.length; j++) {
+            posArray[j * 3] += vels[j].x * delta;
+            posArray[j * 3 + 1] += vels[j].y * delta;
+            posArray[j * 3 + 2] += vels[j].z * delta;
+          }
+          posAttr.needsUpdate = true;
+          exp.material.opacity = exp.userData.life / 0.4;
+        }
+      }
     }
 
     function create3DHUD() {
@@ -450,7 +574,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.0.0 (Native Local-Floor)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.2.0 (Audio & Particle FX)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
@@ -572,15 +696,22 @@
         const hitBtn = hudButtons.find(b => b === hit.object);
 
         if (hitBtn) {
-          playPopSound(false);
+          playPopSound(false, false);
           if (hitBtn.userData.action === 'pitch_down') { currentGunPitch += THREE.MathUtils.degToRad(1); updateGunRotation(); }
           else if (hitBtn.userData.action === 'pitch_up') { currentGunPitch -= THREE.MathUtils.degToRad(1); updateGunRotation(); }
           else if (hitBtn.userData.action === 'toggle_laser') { toggleLaser(); }
           else if (hitBtn.userData.action === 'select_game') { switchNextMiniGame(); }
           else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
         } else if (activeMiniGame && gameState === 'PLAYING') {
+          const hitColorHex = hit.object.material.color.getHex();
           const pointsEarned = activeMiniGame.onHit(hit.object);
-          if (pointsEarned !== 0) { playPopSound(pointsEarned < 0); score += pointsEarned; updateHudTexture(); }
+
+          if (pointsEarned !== 0) {
+            playPopSound(pointsEarned < 0, true);
+            createExplosion(hit.point, hitColorHex);
+            score += pointsEarned;
+            updateHudTexture();
+          }
         }
       }
       createTracer(origin, endPoint);
@@ -619,6 +750,7 @@
       const delta = clock.getDelta();
       if (activeMiniGame && gameState === 'PLAYING') activeMiniGame.update(delta);
       updateTracers(delta);
+      updateExplosions(delta);
       renderer.render(scene, camera);
     }
   </script>
