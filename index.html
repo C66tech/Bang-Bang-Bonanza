@@ -1,366 +1,245 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="game-version" content="1.3.1">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <meta http-equiv="Expires" content="Tue, 01 Jan 1980 1:00:00 GMT">
-
-  <title>Point Panic! XR - v1.3.1</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>WebXR Target Shooter</title>
   <style>
-    body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-    canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
-
-    #xr-button-container {
-      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 12px; z-index: 999;
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: Arial, sans-serif;
     }
-
-    .xr-btn {
-      padding: 12px 24px; font-size: 16px; font-weight: bold; color: #fff;
-      background: rgba(0, 0, 0, 0.8); border: 2px solid #fff; border-radius: 8px;
-      cursor: pointer; transition: all 0.2s ease;
-    }
-    .xr-btn:hover { background: #fff; color: #000; }
-    .xr-btn:disabled { opacity: 0.4; cursor: not-allowed; border-color: #888; color: #ff5555; }
-
-    #version-badge {
-      position: absolute; top: 15px; left: 15px; color: #00ffcc;
-      font-family: monospace; font-size: 14px; background: rgba(0,0,0,0.6);
-      padding: 6px 12px; border-radius: 4px; border: 1px solid #00ffcc; z-index: 999;
-    }
-    
-    #debug-log {
-      position: absolute; top: 60px; left: 15px; color: #ffcc00;
-      font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.8);
-      padding: 10px; z-index: 1000; display: none; max-width: 80%;
+    #ui-overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #00ffcc;
+      font-size: 24px;
+      font-weight: bold;
+      text-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
+      z-index: 100;
+      pointer-events: none;
     }
   </style>
 
-  <!-- LIBRERIE VIA UNPKG (Più stabili per le versioni legacy r128) -->
-  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-  <script src="https://unpkg.com/three@0.128.0/examples/js/webxr/XRControllerModelFactory.js"></script>
+  <!-- Import Map per caricare Three.js ed i moduli WebXR -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
 
-<div id="version-badge">v1.3.1</div>
-<div id="debug-log"></div>
+  <div id="ui-overlay">Punti: <span id="score">0</span></div>
 
-<div id="xr-button-container">
-  <button id="vr-btn" class="xr-btn">ATTENDI...</button>
-  <button id="ar-btn" class="xr-btn">ATTENDI...</button>
-</div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
+    import { ARButton } from 'three/addons/webxr/ARButton.js';
 
-<script>
-  function log(msg) {
-    const el = document.getElementById('debug-log');
-    el.style.display = 'block';
-    el.innerHTML += msg + '<br>';
-  }
-  window.addEventListener('error', function(e) { log(`[GLOBAL ERROR] ${e.message}`); });
+    let scene, camera, renderer;
+    let controllers = [];
+    let bullets = [];
+    let targets = [];
+    let score = 0;
+    const clock = new THREE.Clock();
 
-  const GAME_VERSION = "v1.3.1";
-
-  let scene, camera, renderer, controller, controllerGrip;
-  let raycaster, tempMatrix;
-  let currentSession = null;
-  
-  let hudCanvas, hudContext, hudTexture, hudMesh;
-  let laserLine;
-  let laserEnabled = true;
-
-  let score = 0;
-  let activeTargets = [];
-  const TARGET_LIFESPAN = 2000;
-
-  const COLOR_CONFIG = [
-    { color: 0xff0000, points: 10 },
-    { color: 0x00ff00, points: 10 },
-    { color: 0x0000ff, points: 10 },
-    { color: 0xffff00, points: 20 },
-    { color: 0x111111, points: -30 }
-  ];
-
-  try {
     init();
-    animate();
-  } catch (e) {
-    log(`Init fallito: ${e.message}`);
-  }
 
-  function init() {
-    scene = new THREE.Scene();
-    
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 1);
+    function init() {
+      // 1. Scena 3D
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x101020);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
+      // 2. Camera
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 1.6, 3);
 
-    const light = new THREE.DirectionalLight(0xffffff, 1.5);
-    light.position.set(0, 5, 5).normalize();
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0x606060));
+      // 3. Illuminazione
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+      scene.add(ambientLight);
 
-    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
-    scene.add(gridHelper);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      dirLight.position.set(5, 10, 7);
+      scene.add(dirLight);
 
-    raycaster = new THREE.Raycaster();
-    tempMatrix = new THREE.Matrix4();
+      // 4. Griglia di riferimento per il pavimento (VR)
+      const grid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x444444);
+      grid.position.y = 0;
+      scene.add(grid);
 
-    // ========================================================
-    // 1. TARGET RAY (Mirino, Canna e Laser)
-    // ========================================================
-    controller = renderer.xr.getController(0);
-    controller.addEventListener('selectstart', onTriggerPress);
-    scene.add(controller);
+      // 5. Renderer WebGL + Abilita WebXR
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
 
-    const gunGroup = new THREE.Group();
-    
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.015, 0.015, 0.25),
-      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 })
-    );
-    barrel.rotation.x = -Math.PI / 2;
-    barrel.position.set(0, 0, -0.15);
-    gunGroup.add(barrel);
+      // 6. Bottoni di ingresso Sessione AR / VR
+      document.body.appendChild(VRButton.createButton(renderer));
+      document.body.appendChild(ARButton.createButton(renderer));
 
-    const laserGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, -0.27),
-      new THREE.Vector3(0, 0, -5)
-    ]);
-    const laserMat = new THREE.LineBasicMaterial({ color: 0xff00cc, opacity: 0.8, transparent: true });
-    laserLine = new THREE.Line(laserGeo, laserMat);
-    gunGroup.add(laserLine);
+      // 7. Setup Controller e Pistole
+      setupControllers();
 
-    controller.add(gunGroup);
-
-    // ========================================================
-    // 2. GRIP SPACE CON FALLBACK SICURO
-    // ========================================================
-    controllerGrip = renderer.xr.getControllerGrip(0);
-    scene.add(controllerGrip);
-
-    try {
-      // Tentativo di caricare il modello ufficiale del visore
-      if (typeof THREE.XRControllerModelFactory !== 'undefined') {
-        const controllerModelFactory = new THREE.XRControllerModelFactory();
-        const controllerModel = controllerModelFactory.createControllerModel(controllerGrip);
-        controllerGrip.add(controllerModel);
-      } else {
-        throw new Error("La classe non esiste nell'oggetto THREE globale.");
-      }
-    } catch (err) {
-      log(`Controller Model fallback attivato: ${err.message}`);
-      
-      // Impugnatura di emergenza (Scatola Grigia)
-      const fallbackHandle = new THREE.Mesh(
-        new THREE.BoxGeometry(0.04, 0.12, 0.04),
-        new THREE.MeshStandardMaterial({ color: 0x333333 })
-      );
-      fallbackHandle.position.set(0, -0.04, 0.02);
-      fallbackHandle.rotation.x = Math.PI / 8;
-      controllerGrip.add(fallbackHandle);
-    }
-    // ========================================================
-
-    createLeftHUD();
-    setupXRButtons();
-
-    setInterval(spawnTarget, 800);
-  }
-
-  function createLeftHUD() {
-    hudCanvas = document.createElement('canvas');
-    hudCanvas.width = 512;
-    hudCanvas.height = 512;
-    hudContext = hudCanvas.getContext('2d');
-
-    hudTexture = new THREE.CanvasTexture(hudCanvas);
-    const hudMaterial = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
-    const hudGeometry = new THREE.PlaneGeometry(0.8, 0.8);
-
-    hudMesh = new THREE.Mesh(hudGeometry, hudMaterial);
-    hudMesh.position.set(-1.2, 1.4, -1.5);
-    hudMesh.rotation.y = Math.PI / 6;
-
-    scene.add(hudMesh);
-    updateHUDText();
-  }
-
-  function updateHUDText() {
-    hudContext.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
-    
-    hudContext.fillStyle = 'rgba(10, 15, 30, 0.85)';
-    hudContext.fillRect(10, 10, 492, 492);
-    hudContext.strokeStyle = '#00ffcc';
-    hudContext.lineWidth = 6;
-    hudContext.strokeRect(10, 10, 492, 492);
-
-    hudContext.fillStyle = '#00ffcc';
-    hudContext.font = 'bold 36px monospace';
-    hudContext.fillText('POINT PANIC! XR', 40, 60);
-
-    hudContext.fillStyle = '#ffffff';
-    hudContext.font = '28px monospace';
-    hudContext.fillText(`VERSION: ${GAME_VERSION}`, 40, 100);
-
-    hudContext.strokeStyle = '#00ffcc';
-    hudContext.lineWidth = 2;
-    hudContext.beginPath();
-    hudContext.moveTo(40, 120);
-    hudContext.lineTo(470, 120);
-    hudContext.stroke();
-
-    hudContext.fillStyle = '#ffcc00';
-    hudContext.font = 'bold 42px monospace';
-    hudContext.fillText(`SCORE: ${score}`, 40, 180);
-
-    hudContext.fillStyle = '#cccccc';
-    hudContext.font = '24px sans-serif';
-    hudContext.fillText('Minigame 1: Sphere Panic', 40, 230);
-    hudContext.fillText('• Red/Green/Blue: +10', 40, 270);
-    hudContext.fillText('• Yellow Bonus:  +20', 40, 310);
-    hudContext.fillText('• Black Penalty: -30', 40, 350);
-
-    hudContext.fillStyle = laserEnabled ? '#00ffcc' : '#555555';
-    hudContext.fillRect(40, 400, 220, 60);
-    
-    hudContext.fillStyle = laserEnabled ? '#000000' : '#ffffff';
-    hudContext.font = 'bold 24px monospace';
-    hudContext.fillText(laserEnabled ? 'LASER: ON' : 'LASER: OFF', 65, 438);
-
-    hudTexture.needsUpdate = true;
-  }
-
-  function setupXRButtons() {
-    const vrBtn = document.getElementById('vr-btn');
-    const arBtn = document.getElementById('ar-btn');
-
-    if (navigator.xr) {
-      navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
-        vrBtn.disabled = !supported;
-        vrBtn.textContent = supported ? 'ENTER VR' : 'VR NON SUPP.';
-      });
-      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-        arBtn.disabled = !supported;
-        arBtn.textContent = supported ? 'ENTER AR' : 'AR NON SUPP.';
-      });
-
-      vrBtn.addEventListener('click', () => onRequestSession('immersive-vr'));
-      arBtn.addEventListener('click', () => onRequestSession('immersive-ar'));
-    } else {
-      vrBtn.disabled = true;
-      arBtn.disabled = true;
-      vrBtn.textContent = 'NO API XR';
-      arBtn.textContent = 'NO API XR';
-      log("WebXR non supportato (Serve HTTPS o Localhost).");
-    }
-  }
-
-  async function onRequestSession(mode) {
-    if (currentSession) {
-      currentSession.end();
-      return;
-    }
-    try {
-      const session = await navigator.xr.requestSession(mode, {
-        optionalFeatures: ['local-floor', 'bounded-floor']
-      });
-      currentSession = session;
-      renderer.xr.setSession(session);
-
-      if (mode === 'immersive-ar') {
-        scene.background = null;
-      } else {
-        scene.background = new THREE.Color(0x111122);
+      // 8. Genera i primi bersagli
+      for (let i = 0; i < 8; i++) {
+        spawnTarget();
       }
 
-      session.addEventListener('end', () => {
-        currentSession = null;
-        document.getElementById('vr-btn').textContent = 'ENTER VR';
-        document.getElementById('ar-btn').textContent = 'ENTER AR';
-        scene.background = new THREE.Color(0x000000);
-      });
+      window.addEventListener('resize', onWindowResize);
 
-      document.getElementById('vr-btn').textContent = mode === 'immersive-vr' ? 'EXIT VR' : 'ENTER VR';
-      document.getElementById('ar-btn').textContent = mode === 'immersive-ar' ? 'EXIT AR' : 'ENTER AR';
-
-    } catch (e) {
-      log(`Errore avvio XR: ${e.message}`);
+      // Render Loop per WebXR
+      renderer.setAnimationLoop(animate);
     }
-  }
 
-  function spawnTarget() {
-    const config = COLOR_CONFIG[Math.floor(Math.random() * COLOR_CONFIG.length)];
-    const geometry = new THREE.SphereGeometry(0.12, 16, 16);
-    const material = new THREE.MeshStandardMaterial({ color: config.color, roughness: 0.3 });
-    const sphere = new THREE.Mesh(geometry, material);
+    // Creo un modello di pistola Procedurale
+    function createGunModel() {
+      const gunGroup = new THREE.Group();
 
-    sphere.position.x = (Math.random() - 0.5) * 2;
-    sphere.position.y = 1.0 + Math.random() * 1.0;
-    sphere.position.z = -1.2 - Math.random() * 1.3;
+      // Canna della pistola
+      const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16);
+      barrelGeo.rotateX(Math.PI / 2);
+      const gunMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.8 });
+      const barrel = new THREE.Mesh(barrelGeo, gunMat);
+      barrel.position.set(0, 0, -0.1);
+      gunGroup.add(barrel);
 
-    sphere.userData = { points: config.points, spawnTime: performance.now() };
+      // Impugnatura
+      const handleGeo = new THREE.BoxGeometry(0.03, 0.12, 0.04);
+      const handle = new THREE.Mesh(handleGeo, gunMat);
+      handle.position.set(0, -0.05, 0.02);
+      handle.rotation.x = -0.3;
+      gunGroup.add(handle);
 
-    scene.add(sphere);
-    activeTargets.push(sphere);
-  }
+      // Mirino Laser Verde
+      const sightGeo = new THREE.BoxGeometry(0.008, 0.008, 0.01);
+      const sightMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+      const sight = new THREE.Mesh(sightGeo, sightMat);
+      sight.position.set(0, 0.022, -0.2);
+      gunGroup.add(sight);
 
-  function onTriggerPress() {
-    tempMatrix.identity().extractRotation(controller.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+      return gunGroup;
+    }
 
-    const hudIntersects = raycaster.intersectObject(hudMesh);
-    if (hudIntersects.length > 0) {
-      const uv = hudIntersects[0].uv;
-      const clickX = uv.x * 512;
-      const clickY = (1 - uv.y) * 512;
+    function setupControllers() {
+      for (let i = 0; i < 2; i++) {
+        const controller = renderer.xr.getController(i);
 
-      if (clickX >= 40 && clickX <= 260 && clickY >= 400 && clickY <= 460) {
-        laserEnabled = !laserEnabled;
-        laserLine.visible = laserEnabled;
-        updateHUDText();
-        return; 
+        // Aggiunge il modello della pistola al controller
+        const gun = createGunModel();
+        controller.add(gun);
+
+        // Evento sparo al grilletto (Select)
+        controller.addEventListener('selectstart', onShoot);
+
+        scene.add(controller);
+        controllers.push(controller);
       }
     }
 
-    const targetIntersects = raycaster.intersectObjects(activeTargets);
-    if (targetIntersects.length > 0) {
-      const hitObject = targetIntersects[0].object;
-      score += hitObject.userData.points;
-      updateHUDText();
-      destroyTarget(hitObject);
+    function onShoot(event) {
+      const controller = event.target;
+
+      // Creo il proiettile
+      const bulletGeo = new THREE.SphereGeometry(0.02, 8, 8);
+      const bulletMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+      const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+
+      // Posiziona il proiettile sulla punta della pistola
+      controller.getWorldPosition(bullet.position);
+
+      // Calcola la direzione (-Z rispetto al controller)
+      const direction = new THREE.Vector3(0, 0, -1);
+      direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+
+      bullet.userData = {
+        velocity: direction.multiplyScalar(15), // Velocità del proiettile
+        life: 0
+      };
+
+      scene.add(bullet);
+      bullets.push(bullet);
     }
-  }
 
-  function destroyTarget(target) {
-    scene.remove(target);
-    target.geometry.dispose();
-    target.material.dispose();
-    activeTargets = activeTargets.filter(t => t !== target);
-  }
+    function spawnTarget() {
+      const geo = new THREE.IcosahedronGeometry(0.2, 1);
+      const mat = new THREE.MeshStandardMaterial({
+        color: Math.random() * 0xffffff,
+        roughness: 0.2,
+        metalness: 0.6
+      });
+      const target = new THREE.Mesh(geo, mat);
 
-  function animate() {
-    renderer.setAnimationLoop(render);
-  }
+      // Posizionamento casuale davanti al giocatore
+      target.position.x = (Math.random() - 0.5) * 4;
+      target.position.y = 1 + Math.random() * 1.5;
+      target.position.z = -2 - Math.random() * 3;
 
-  function render() {
-    const now = performance.now();
-    for (let i = activeTargets.length - 1; i >= 0; i--) {
-      const target = activeTargets[i];
-      if (now - target.userData.spawnTime > TARGET_LIFESPAN) {
-        destroyTarget(target);
+      scene.add(target);
+      targets.push(target);
+    }
+
+    function updateBullets(delta) {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const bullet = bullets[i];
+        bullet.position.addScaledVector(bullet.userData.velocity, delta);
+        bullet.userData.life += delta;
+
+        // Collisioni con i bersagli
+        for (let j = targets.length - 1; j >= 0; j--) {
+          const target = targets[j];
+          const dist = bullet.position.distanceTo(target.position);
+
+          if (dist < 0.22) { // Impatto avvenuto
+            scene.remove(target);
+            targets.splice(j, 1);
+
+            scene.remove(bullet);
+            bullets.splice(i, 1);
+
+            score += 100;
+            document.getElementById('score').textContent = score;
+
+            spawnTarget(); // Rigenera bersaglio
+            break;
+          }
+        }
+
+        // Rimuovi proiettili vecchi dopo 3 secondi
+        if (bullet.userData.life > 3 && bullets.includes(bullet)) {
+          scene.remove(bullet);
+          bullets.splice(i, 1);
+        }
       }
     }
-    renderer.render(scene, camera);
-  }
-</script>
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      const delta = clock.getDelta();
+
+      // Rotazione bersagli
+      targets.forEach(t => {
+        t.rotation.x += 0.6 * delta;
+        t.rotation.y += 0.8 * delta;
+      });
+
+      // Aggiornamento posizioni e collisioni
+      updateBullets(delta);
+
+      renderer.render(scene, camera);
+    }
+  </script>
 </body>
 </html>
