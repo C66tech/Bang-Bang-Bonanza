@@ -361,9 +361,11 @@
 
       document.body.appendChild(renderer.domElement);
 
-      // TRASPARENZA AR PASSTHROUGH
+      // TRASPARENZA AR PASSTHROUGH E CONFIGURAZIONE RIFERIMENTO
       renderer.xr.addEventListener('sessionstart', () => {
         const session = renderer.xr.getSession();
+        renderer.xr.setReferenceSpaceType('local-floor');
+
         if (session.mode === 'immersive-ar') {
           scene.background = null;
         } else {
@@ -380,13 +382,15 @@
       controls.target.set(0, 1.0, -2.0);
       controls.update();
 
-      // 5. BOTTONI VR E AR AFFIANCATI IN UN CONTENITORE FLEXBOX
+      // 5. BOTTONI VR E AR (AR RICHIEDE OBBLIGATORIAMENTE 'local-floor')
       const xrContainer = document.createElement('div');
       xrContainer.id = 'xr-button-container';
       document.body.appendChild(xrContainer);
 
       const vrButton = VRButton.createButton(renderer);
-      const arButton = ARButton.createButton(renderer);
+      const arButton = ARButton.createButton(renderer, {
+        requiredFeatures: ['local-floor']
+      });
 
       xrContainer.appendChild(vrButton);
       xrContainer.appendChild(arButton);
@@ -424,6 +428,10 @@
       }
       gameState = 'PLAYING';
       score = 0;
+
+      // NASCONDE IL LOGO DURANTE IL GIOCO
+      if (logoMesh) logoMesh.visible = false;
+
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
       
@@ -437,6 +445,10 @@
         activeMiniGame = null;
       }
       gameState = 'LOBBY';
+
+      // MOSTRA DI NUOVO IL LOGO IN LOBBY
+      if (logoMesh) logoMesh.visible = true;
+
       updateHudTexture();
       update3DButtonText(btnStartMesh, "▶ START GIOCO", "#00ffcc");
     }
@@ -461,6 +473,7 @@
 
       logoMesh = new THREE.Mesh(logoGeo, logoMat);
       logoMesh.position.set(0, 1.45, -2.0);
+      logoMesh.visible = (gameState === 'LOBBY');
       scene.add(logoMesh);
 
       const textureLoader = new THREE.TextureLoader();
@@ -578,11 +591,11 @@
       osc.stop(now + 0.12);
     }
 
-    // --- HUD 3D ---
+    // --- HUD 3D SPOSTATO PIÙ A SINISTRA (X = -1.25, Z = -1.5, Rotazione = 32°) ---
     function create3DHUD() {
       const hudGroup = new THREE.Group();
-      hudGroup.position.set(-0.70, 1.05, -1.6);
-      hudGroup.rotation.y = THREE.MathUtils.degToRad(18);
+      hudGroup.position.set(-1.25, 1.05, -1.5);
+      hudGroup.rotation.y = THREE.MathUtils.degToRad(32);
 
       hudCanvas = document.createElement('canvas');
       hudCanvas.width = 512;
@@ -645,7 +658,7 @@
 
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 18px Arial';
-      hudCtx.fillText('Versione: v2.7.0 (Local-Floor Fix)', 28, 80);
+      hudCtx.fillText('Versione: v2.8.0', 28, 80);
 
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703';
       hudCtx.font = 'bold 20px Arial';
