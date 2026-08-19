@@ -51,7 +51,7 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     let scene, camera, renderer, controls, floorWireframe;
-    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [];
+    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [], floatingTexts = [];
     let score = 0;
     let gameState = 'LOBBY';
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
@@ -71,9 +71,10 @@
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Minigioco 1";
-        this.duration = 20; // DURATA PERSONALIZZABILE (SECONDI)
+        this.duration = 20;
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
         this.spheres = [];
         this.colorPalette = [
           { name: 'Giallo', hex: 0xffff00, points: 100 },
@@ -90,6 +91,7 @@
         this.cleanup();
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
         updateTimerDisplay(this.timeRemaining);
 
         const rows = 3, cols = 3, spacingX = 0.45, spacingY = 0.30;
@@ -119,14 +121,15 @@
       }
 
       onHit(hitObject) {
+        if (this.isGameOver) return { points: 0, combo: 1 };
         const sphere = this.spheres.find(s => s === hitObject);
-        if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
+        if (!sphere || !sphere.userData.active || !sphere.visible) return { points: 0, combo: 1 };
         const points = sphere.userData.colorInfo.points;
         sphere.userData.active = false;
         sphere.visible = false;
 
         setTimeout(() => {
-          if (this.spheres.includes(sphere) && gameState === 'PLAYING') {
+          if (this.spheres.includes(sphere) && gameState === 'PLAYING' && !this.isGameOver) {
             const newColor = this.getRandomColorObj();
             sphere.userData.colorInfo = newColor;
             sphere.material.color.setHex(newColor.hex);
@@ -134,11 +137,12 @@
             sphere.visible = true;
           }
         }, 2000);
-        return points;
+        return { points: points, combo: 1 };
       }
 
       update(delta) {
-        // GESTIONE CONTO ALLA ROVESCIA
+        if (this.isGameOver) return;
+
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
 
@@ -148,8 +152,15 @@
           updateTimerDisplay(this.timeRemaining);
         }
 
-        if (this.timeRemaining <= 0) {
-          stopCurrentGame();
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
           return;
         }
 
@@ -163,18 +174,21 @@
     }
 
     // ==========================================
-    // CLASSE MINIGIOCO 2 (6 Sfere)
+    // CLASSE MINIGIOCO 2 (6 Sfere + Combo dello Stesso Colore)
     // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Minigioco 2";
-        this.duration = 20; // DURATA PERSONALIZZABILE (SECONDI)
+        this.duration = 20;
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
         this.spheres = [];
         this.waveTimer = 0;
         this.isWaveActive = true;
+        this.lastColorHex = null;
+        this.comboStreak = 1;
         this.colorPalette = [
           { name: 'Giallo', hex: 0xffff00, points: 100 },
           { name: 'Verde',  hex: 0x00ff00, points: 100 },
@@ -190,8 +204,11 @@
         this.cleanup();
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
         this.waveTimer = 0;
         this.isWaveActive = true;
+        this.lastColorHex = null;
+        this.comboStreak = 1;
         updateTimerDisplay(this.timeRemaining);
 
         const count = 6, spacingX = 0.40;
@@ -219,16 +236,33 @@
       }
 
       onHit(hitObject) {
+        if (this.isGameOver) return { points: 0, combo: 1 };
         const sphere = this.spheres.find(s => s === hitObject);
-        if (!sphere || !sphere.userData.active || !sphere.visible) return 0;
-        const points = sphere.userData.colorInfo.points;
+        if (!sphere || !sphere.userData.active || !sphere.visible) return { points: 0, combo: 1 };
+
+        const colorHex = sphere.userData.colorInfo.hex;
+        const basePoints = sphere.userData.colorInfo.points;
+
+        // SISTEMA COMBO: Se lo stesso colore positivo viene colpito di seguito
+        if (this.lastColorHex !== null && this.lastColorHex === colorHex && basePoints > 0) {
+          this.comboStreak++;
+        } else {
+          this.lastColorHex = colorHex;
+          this.comboStreak = 1;
+        }
+
+        const multiplier = this.comboStreak;
+        const finalPoints = basePoints * multiplier;
+
         sphere.userData.active = false;
         sphere.visible = false;
-        return points;
+
+        return { points: finalPoints, combo: multiplier };
       }
 
       update(delta) {
-        // GESTIONE CONTO ALLA ROVESCIA GENERALE
+        if (this.isGameOver) return;
+
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
 
@@ -238,8 +272,15 @@
           updateTimerDisplay(this.timeRemaining);
         }
 
-        if (this.timeRemaining <= 0) {
-          stopCurrentGame();
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
           return;
         }
 
@@ -252,6 +293,9 @@
         } else if (!this.isWaveActive && this.waveTimer >= 3.0) {
           this.waveTimer = 0;
           this.isWaveActive = true;
+          this.lastColorHex = null;
+          this.comboStreak = 1;
+
           this.spheres.forEach(s => {
             const newColor = this.getRandomColorObj();
             s.userData.colorInfo = newColor;
@@ -336,7 +380,7 @@
       setupControllers();
       create3DHUD();
       createPresentationLogo();
-      create3DTimerDisplay(); // CREAZIONE DISPLAY TIMER
+      create3DTimerDisplay();
       updateGunRotation();
 
       miniGameList = [MiniGame1, MiniGame2];
@@ -380,7 +424,6 @@
       else updateHudTexture();
     }
 
-    // --- CREAZIONE DISPLAY TIMER 3D (Y = 2.0m) ---
     function create3DTimerDisplay() {
       timerCanvas = document.createElement('canvas');
       timerCanvas.width = 256;
@@ -391,7 +434,7 @@
       const geo = new THREE.PlaneGeometry(0.8, 0.4);
       const mat = new THREE.MeshBasicMaterial({ map: timerTexture, transparent: true, side: THREE.DoubleSide });
       timerMesh = new THREE.Mesh(geo, mat);
-      timerMesh.position.set(0, 2.0, -2.2); // Posizionato a 2m di altezza
+      timerMesh.position.set(0, 2.0, -2.2);
       timerMesh.visible = false;
       scene.add(timerMesh);
     }
@@ -399,7 +442,7 @@
     function updateTimerDisplay(secondsLeft) {
       if (!timerCtx) return;
       const secInt = Math.max(0, Math.ceil(secondsLeft));
-      const colorHex = secInt <= 5 ? '#ff0000' : '#ffff00'; // Rosso <= 5s, Giallo altrimenti
+      const colorHex = secInt <= 5 ? '#ff0000' : '#ffff00';
 
       timerCtx.clearRect(0, 0, 256, 128);
       timerCtx.fillStyle = colorHex;
@@ -409,6 +452,57 @@
       timerCtx.fillText(secInt.toString(), 128, 64);
 
       timerTexture.needsUpdate = true;
+    }
+
+    // CREAZIONE ANIMAZIONE TESTO FLUTTUANTE "COMBO Xn"
+    function createFloatingText(text, position) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#ffea00';
+      ctx.font = 'bold 44px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 6;
+      ctx.strokeText(text, 128, 64);
+      ctx.fillText(text, 128, 64);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 1.0,
+        side: THREE.DoubleSide
+      });
+
+      const geo = new THREE.PlaneGeometry(0.7, 0.35);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(position);
+
+      mesh.userData = { life: 0.8, initialLife: 0.8 };
+      scene.add(mesh);
+      floatingTexts.push(mesh);
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        const ft = floatingTexts[i];
+        ft.userData.life -= delta;
+
+        if (ft.userData.life <= 0) {
+          scene.remove(ft);
+          ft.geometry.dispose();
+          ft.material.map.dispose();
+          ft.material.dispose();
+          floatingTexts.splice(i, 1);
+        } else {
+          ft.position.y += 0.6 * delta; // Movimento verso l'alto
+          ft.material.opacity = ft.userData.life / ft.userData.initialLife; // Sfumatura graduale
+        }
+      }
     }
 
     function createPresentationLogo() {
@@ -446,7 +540,30 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
-    // AUDIO BEEP PER CONTO ALLA ROVESCIA
+    function playBellSound() {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const duration = 1.0;
+
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc1.type = 'sine'; osc2.type = 'sine';
+      osc1.frequency.setValueAtTime(1320, now);
+      osc2.frequency.setValueAtTime(1328, now);
+
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      osc1.connect(gain); osc2.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc1.start(now); osc2.start(now);
+      osc1.stop(now + duration); osc2.stop(now + duration);
+    }
+
     function playBeepSound(isUrgent = false) {
       initAudio();
       if (!audioCtx) return;
@@ -456,16 +573,13 @@
       const gain = audioCtx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(isUrgent ? 880 : 440, now); // 880Hz (A5) per urgenti, 440Hz (A4) per standard
+      osc.frequency.setValueAtTime(isUrgent ? 880 : 440, now);
 
       gain.gain.setValueAtTime(0.3, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
 
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      osc.start(now);
-      osc.stop(now + 0.08);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.08);
     }
 
     function playGunshotSound() {
@@ -679,7 +793,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.3.0 (Timer 20s)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.5.0 (Combo System)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
@@ -809,12 +923,18 @@
           else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
         } else if (activeMiniGame && gameState === 'PLAYING') {
           const hitColorHex = hit.object.material.color.getHex();
-          const pointsEarned = activeMiniGame.onHit(hit.object);
+          const hitResult = activeMiniGame.onHit(hit.object);
 
-          if (pointsEarned !== 0) {
-            playPopSound(pointsEarned < 0, true);
+          if (hitResult.points !== 0) {
+            playPopSound(hitResult.points < 0, true);
             createExplosion(hit.point, hitColorHex);
-            score += pointsEarned;
+
+            // Generazione animazione "Combo Xn" se il moltiplicatore è > 1
+            if (hitResult.combo > 1) {
+              createFloatingText("Combo X" + hitResult.combo, hit.point.clone());
+            }
+
+            score += hitResult.points;
             updateHudTexture();
           }
         }
@@ -856,6 +976,7 @@
       if (activeMiniGame && gameState === 'PLAYING') activeMiniGame.update(delta);
       updateTracers(delta);
       updateExplosions(delta);
+      updateFloatingTexts(delta);
       renderer.render(scene, camera);
     }
   </script>
