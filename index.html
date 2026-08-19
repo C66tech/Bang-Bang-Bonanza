@@ -35,8 +35,9 @@
     import * as THREE from 'three';
     import { VRButton } from 'three/addons/webxr/VRButton.js';
     import { ARButton } from 'three/addons/webxr/ARButton.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    let scene, camera, renderer;
+    let scene, camera, renderer, controls;
     let controllers = [];
     let gunPivots = [];
     let laserLines = [];
@@ -44,7 +45,7 @@
     let hudButtons = [];
     let score = 0;
     
-    // INCLINAZIONE DEFAULT A -14 DEGREES
+    // INCLINAZIONE DEFAULT -14°
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
     
@@ -251,7 +252,6 @@
       update(delta) {
         this.timer += delta;
 
-        // Allo scadere di 5 secondi scompaiono tutte le sfere
         if (this.isWaveActive && this.timer >= 5.0) {
           this.isWaveActive = false;
           this.spheres.forEach(s => {
@@ -259,7 +259,6 @@
             s.visible = false;
           });
         } 
-        // Dopo 1 secondo di assenza (totale 6s), riappaiono tutte con nuovi colori casuali
         else if (!this.isWaveActive && this.timer >= 6.0) {
           this.timer = 0;
           this.isWaveActive = true;
@@ -298,17 +297,18 @@
     function init() {
       // 1. Scena 3D
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x101020);
+      scene.background = new THREE.Color(0x0c0f1d);
 
       // 2. Camera
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, 1.6, 3);
+      camera.position.set(0, 1.5, 0.5);
+      camera.lookAt(0, 1.2, -2.5);
 
       // 3. Illuminazione
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
       scene.add(ambientLight);
 
-      const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
 
@@ -318,6 +318,11 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
+
+      // Controlli per anteprima Desktop (Mouse)
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1.2, -2.5);
+      controls.update();
 
       // 5. Bottoni di ingresso VR e AR
       document.body.appendChild(VRButton.createButton(renderer));
@@ -329,7 +334,7 @@
       // 7. Setup HUD 3D Posizionato a Livello Testa
       create3DHUD();
 
-      // 8. Schermata di Presentazione / Logo Trasparente
+      // 8. Schermata di Presentazione / Logo (con Fallback Sicuro)
       createPresentationLogo();
 
       // Applicazione inclinazione iniziale (-14°)
@@ -365,24 +370,58 @@
       loadMiniGame(currentMiniGameIndex);
     }
 
-    // --- SCHERMATA DI PRESENTAZIONE (LOGO CON TRASPARENZA PNG) ---
+    // --- PRESENTAZIONE LOGO CON FALLBACK ANTIERRORE ---
     function createPresentationLogo() {
-      const textureLoader = new THREE.TextureLoader();
-      
-      const logoTexture = textureLoader.load('logo.png');
-      logoTexture.colorSpace = THREE.SRGBColorSpace;
-
-      const logoGeo = new THREE.PlaneGeometry(2.0, 1.0);
+      const logoGeo = new THREE.PlaneGeometry(2.2, 1.1);
       const logoMat = new THREE.MeshBasicMaterial({
-        map: logoTexture,
         transparent: true,
         alphaTest: 0.05,
         side: THREE.DoubleSide
       });
 
       const logoMesh = new THREE.Mesh(logoGeo, logoMat);
-      logoMesh.position.set(0, 2.1, -2.5);
+      logoMesh.position.set(0, 2.15, -2.5);
       scene.add(logoMesh);
+
+      // Carica logo.png con gestione di errore/fallback
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.load(
+        'logo.png',
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          logoMat.map = texture;
+          logoMat.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          // Se logo.png non esiste o è bloccato da CORS, crea una grafica Canvas di riserva
+          console.warn("logo.png non trovato. Generazione logo dinamico di riserva.");
+          const canvas = document.createElement('canvas');
+          canvas.width = 512;
+          canvas.height = 256;
+          const ctx = canvas.getContext('2d');
+
+          ctx.fillStyle = 'rgba(10, 15, 30, 0.85)';
+          ctx.fillRect(10, 10, 492, 236);
+
+          ctx.strokeStyle = '#ff2a6d';
+          ctx.lineWidth = 6;
+          ctx.strokeRect(10, 10, 492, 236);
+
+          ctx.fillStyle = '#ff2a6d';
+          ctx.font = 'bold 36px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('BANG BANG', 256, 110);
+
+          ctx.fillStyle = '#00ffcc';
+          ctx.font = 'bold 42px Arial';
+          ctx.fillText('BONANZA', 256, 175);
+
+          const fallbackTexture = new THREE.CanvasTexture(canvas);
+          logoMat.map = fallbackTexture;
+          logoMat.needsUpdate = true;
+        }
+      );
     }
 
     // --- SINTETIZZATORE AUDIO WEB AUDIO API ---
@@ -508,27 +547,22 @@
       hudCtx.lineWidth = 8;
       hudCtx.strokeRect(4, 4, 504, 292);
 
-      // Titolo Gioco
       hudCtx.fillStyle = '#ff2a6d';
       hudCtx.font = 'bold 26px Arial';
       hudCtx.fillText('BANG BANG BONANZA', 28, 45);
 
-      // Versione
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Versione: v1.9.0', 28, 85);
+      hudCtx.fillText('Versione: v2.0.0', 28, 85);
 
-      // Modalità Corrente
       hudCtx.fillStyle = '#00ffcc';
       hudCtx.font = 'bold 22px Arial';
       hudCtx.fillText('Gioco: ' + (activeMiniGame ? activeMiniGame.name : 'Minigioco 1'), 28, 125);
 
-      // Punti
       hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d';
       hudCtx.font = 'bold 32px Arial';
       hudCtx.fillText('Punti: ' + score, 28, 185);
 
-      // Inclinazione Pistola in gradi
       const degPitch = Math.round(THREE.MathUtils.radToDeg(currentGunPitch));
       hudCtx.fillStyle = '#ffb703';
       hudCtx.font = 'bold 22px Arial';
@@ -703,7 +737,6 @@
         if (hitBtn) {
           playPopSound(false);
 
-          // VARIAZIONE DI 1 GRADO ALLA VOLTA
           if (hitBtn.userData.action === 'pitch_down') {
             currentGunPitch += THREE.MathUtils.degToRad(1);
             updateGunRotation();
