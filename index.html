@@ -61,12 +61,19 @@
     let hudCanvas, hudCtx, hudTexture;
     let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
     let logoMesh = null;
+    let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
     const clock = new THREE.Clock();
 
+    // ==========================================
+    // CLASSE MINIGIOCO 1 (Griglia 3x3)
+    // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Minigioco 1";
+        this.duration = 20; // DURATA PERSONALIZZABILE (SECONDI)
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
         this.spheres = [];
         this.colorPalette = [
           { name: 'Giallo', hex: 0xffff00, points: 100 },
@@ -81,6 +88,10 @@
 
       init() {
         this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        updateTimerDisplay(this.timeRemaining);
+
         const rows = 3, cols = 3, spacingX = 0.45, spacingY = 0.30;
         const startX = -((cols - 1) * spacingX) / 2;
         const startY = 0.60, centerZ = -2.2;
@@ -127,6 +138,21 @@
       }
 
       update(delta) {
+        // GESTIONE CONTO ALLA ROVESCIA
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0) {
+          stopCurrentGame();
+          return;
+        }
+
         this.spheres.forEach(s => { if (s.userData.active && s.visible) s.rotation.y += 0.8 * delta; });
       }
 
@@ -136,12 +162,18 @@
       }
     }
 
+    // ==========================================
+    // CLASSE MINIGIOCO 2 (6 Sfere)
+    // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Minigioco 2";
+        this.duration = 20; // DURATA PERSONALIZZABILE (SECONDI)
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
         this.spheres = [];
-        this.timer = 0;
+        this.waveTimer = 0;
         this.isWaveActive = true;
         this.colorPalette = [
           { name: 'Giallo', hex: 0xffff00, points: 100 },
@@ -156,8 +188,12 @@
 
       init() {
         this.cleanup();
-        this.timer = 0;
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.waveTimer = 0;
         this.isWaveActive = true;
+        updateTimerDisplay(this.timeRemaining);
+
         const count = 6, spacingX = 0.40;
         const startX = -((count - 1) * spacingX) / 2;
         const posY = 0.90, posZ = -2.2;
@@ -192,13 +228,29 @@
       }
 
       update(delta) {
-        this.timer += delta;
-        if (this.isWaveActive && this.timer >= 2.0) {
+        // GESTIONE CONTO ALLA ROVESCIA GENERALE
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0) {
+          stopCurrentGame();
+          return;
+        }
+
+        // GESTIONE ONDATE (2s VISIBILI / 1s PAUSA)
+        this.waveTimer += delta;
+        if (this.isWaveActive && this.waveTimer >= 2.0) {
           this.isWaveActive = false;
           this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
           playDullSound(1.0);
-        } else if (!this.isWaveActive && this.timer >= 3.0) {
-          this.timer = 0;
+        } else if (!this.isWaveActive && this.waveTimer >= 3.0) {
+          this.waveTimer = 0;
           this.isWaveActive = true;
           this.spheres.forEach(s => {
             const newColor = this.getRandomColorObj();
@@ -284,6 +336,7 @@
       setupControllers();
       create3DHUD();
       createPresentationLogo();
+      create3DTimerDisplay(); // CREAZIONE DISPLAY TIMER
       updateGunRotation();
 
       miniGameList = [MiniGame1, MiniGame2];
@@ -303,6 +356,8 @@
       gameState = 'PLAYING';
       score = 0;
       if (logoMesh) logoMesh.visible = false;
+      if (timerMesh) timerMesh.visible = true;
+
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
       updateHudTexture();
@@ -313,6 +368,8 @@
       if (activeMiniGame) { activeMiniGame.cleanup(); activeMiniGame = null; }
       gameState = 'LOBBY';
       if (logoMesh) logoMesh.visible = true;
+      if (timerMesh) timerMesh.visible = false;
+
       updateHudTexture();
       update3DButtonText(btnStartMesh, "▶ START GIOCO", "#00ffcc");
     }
@@ -321,6 +378,37 @@
       currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
       if (gameState === 'PLAYING') startSelectedGame();
       else updateHudTexture();
+    }
+
+    // --- CREAZIONE DISPLAY TIMER 3D (Y = 2.0m) ---
+    function create3DTimerDisplay() {
+      timerCanvas = document.createElement('canvas');
+      timerCanvas.width = 256;
+      timerCanvas.height = 128;
+      timerCtx = timerCanvas.getContext('2d');
+      timerTexture = new THREE.CanvasTexture(timerCanvas);
+
+      const geo = new THREE.PlaneGeometry(0.8, 0.4);
+      const mat = new THREE.MeshBasicMaterial({ map: timerTexture, transparent: true, side: THREE.DoubleSide });
+      timerMesh = new THREE.Mesh(geo, mat);
+      timerMesh.position.set(0, 2.0, -2.2); // Posizionato a 2m di altezza
+      timerMesh.visible = false;
+      scene.add(timerMesh);
+    }
+
+    function updateTimerDisplay(secondsLeft) {
+      if (!timerCtx) return;
+      const secInt = Math.max(0, Math.ceil(secondsLeft));
+      const colorHex = secInt <= 5 ? '#ff0000' : '#ffff00'; // Rosso <= 5s, Giallo altrimenti
+
+      timerCtx.clearRect(0, 0, 256, 128);
+      timerCtx.fillStyle = colorHex;
+      timerCtx.font = 'bold 84px Arial';
+      timerCtx.textAlign = 'center';
+      timerCtx.textBaseline = 'middle';
+      timerCtx.fillText(secInt.toString(), 128, 64);
+
+      timerTexture.needsUpdate = true;
     }
 
     function createPresentationLogo() {
@@ -358,7 +446,28 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
-    // SUONO PISTOLA REALISTICO (DURATA 0.35s CON SUB-BASS E RIVERBERO)
+    // AUDIO BEEP PER CONTO ALLA ROVESCIA
+    function playBeepSound(isUrgent = false) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(isUrgent ? 880 : 440, now); // 880Hz (A5) per urgenti, 440Hz (A4) per standard
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.08);
+    }
+
     function playGunshotSound() {
       initAudio();
       if (!audioCtx) return;
@@ -396,13 +505,11 @@
       noise.start(now);
     }
 
-    // SUONO SCOPPIO + PLOP PER LA SFERA
     function playPopSound(isNegative = false, isTargetExplosion = false) {
       initAudio();
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
 
-      // Componente tonale (Plop)
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
@@ -418,7 +525,6 @@
       osc.connect(gain); gain.connect(audioCtx.destination);
       osc.start(now); osc.stop(now + 0.12);
 
-      // Componente di rumore (Scoppio/Crack ad aria)
       if (isTargetExplosion) {
         const burstDuration = 0.12;
         const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * burstDuration, audioCtx.sampleRate);
@@ -466,7 +572,6 @@
       osc.start(now); osc.stop(now + duration);
     }
 
-    // ANIMAZIONE DI ESPLOSIONE PARTICELLE COLPIRE
     function createExplosion(position, colorHex) {
       const count = 30;
       const geo = new THREE.BufferGeometry();
@@ -574,7 +679,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.2.0 (Audio & Particle FX)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.3.0 (Timer 20s)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
