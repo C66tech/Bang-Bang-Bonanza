@@ -17,6 +17,25 @@
       background-color: #000;
       font-family: Arial, sans-serif;
     }
+
+    /* CONTENITORE FLEXBOX PER AFFIANCARE I BOTTONI XR SENZA SOVRAPPOSIZIONI */
+    #xr-button-container {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 15px;
+      z-index: 1000;
+    }
+
+    #xr-button-container button {
+      position: static !important;
+      left: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      margin: 0 !important;
+    }
   </style>
 
   <!-- Import Map Three.js via ES Modules -->
@@ -318,7 +337,7 @@
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
 
-      // CREAZIONE PAVIMENTO WIREFRAME LUMINOSO A Y = 0
+      // PAVIMENTO WIREFRAME A Y = 0
       const floorGeo = new THREE.PlaneGeometry(10, 10, 20, 20);
       floorGeo.rotateX(-Math.PI / 2);
       const floorMat = new THREE.MeshBasicMaterial({ 
@@ -336,9 +355,13 @@
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
+      
+      // CONFIGURAZIONE SPAZIO DI RIFERIMENTO 'local-floor'
+      renderer.xr.setReferenceSpaceType('local-floor');
+
       document.body.appendChild(renderer.domElement);
 
-      // Mantiene visibile il wireframe del pavimento anche in AR Passthrough
+      // TRASPARENZA AR PASSTHROUGH
       renderer.xr.addEventListener('sessionstart', () => {
         const session = renderer.xr.getSession();
         if (session.mode === 'immersive-ar') {
@@ -357,9 +380,16 @@
       controls.target.set(0, 1.0, -2.0);
       controls.update();
 
-      // 5. Bottoni di ingresso VR e AR
-      document.body.appendChild(VRButton.createButton(renderer));
-      document.body.appendChild(ARButton.createButton(renderer));
+      // 5. BOTTONI VR E AR AFFIANCATI IN UN CONTENITORE FLEXBOX
+      const xrContainer = document.createElement('div');
+      xrContainer.id = 'xr-button-container';
+      document.body.appendChild(xrContainer);
+
+      const vrButton = VRButton.createButton(renderer);
+      const arButton = ARButton.createButton(renderer);
+
+      xrContainer.appendChild(vrButton);
+      xrContainer.appendChild(arButton);
 
       // 6. Setup Controller e Pistole
       setupControllers();
@@ -615,7 +645,7 @@
 
       hudCtx.fillStyle = '#ffffff';
       hudCtx.font = 'bold 18px Arial';
-      hudCtx.fillText('Versione: v2.5.0 (Wireframe Floor)', 28, 80);
+      hudCtx.fillText('Versione: v2.7.0 (Local-Floor Fix)', 28, 80);
 
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703';
       hudCtx.font = 'bold 20px Arial';
