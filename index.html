@@ -17,41 +17,65 @@
       background-color: #000;
       font-family: Arial, sans-serif;
     }
+    /* RETTANGOLO HUD SULLA SINISTRA */
     #ui-overlay {
       position: absolute;
       top: 20px;
       left: 20px;
-      color: #00ffcc;
-      font-size: 20px;
-      font-weight: bold;
-      text-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
-      z-index: 100;
-      pointer-events: none; /* Permette al touch/mouse di passare oltre il contenitore */
-    }
-    #hud-controls {
-      margin-top: 15px;
-      display: flex;
-      gap: 10px;
-    }
-    .hud-btn {
-      pointer-events: auto; /* Rende cliccabili i pulsanti dell'HUD */
-      background: rgba(0, 0, 0, 0.6);
+      width: 220px;
+      background: rgba(10, 15, 30, 0.85);
       border: 2px solid #00ffcc;
+      border-radius: 8px;
+      padding: 16px;
       color: #00ffcc;
-      padding: 10px 14px;
+      box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+      z-index: 100;
+      pointer-events: auto;
+    }
+    .hud-header {
+      font-size: 12px;
+      color: #88ffeb;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .hud-version {
       font-size: 14px;
       font-weight: bold;
-      border-radius: 6px;
+      color: #ffffff;
+      margin-bottom: 12px;
+      border-bottom: 1px solid rgba(0, 255, 204, 0.3);
+      padding-bottom: 6px;
+    }
+    .hud-score {
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
+    }
+    #hud-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .hud-btn {
+      background: rgba(0, 255, 204, 0.1);
+      border: 1px solid #00ffcc;
+      color: #00ffcc;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: bold;
+      border-radius: 4px;
       cursor: pointer;
       transition: all 0.2s ease;
-      text-shadow: 0 0 5px rgba(0, 255, 204, 0.8);
+      text-align: center;
     }
     .hud-btn:hover {
       background: #00ffcc;
       color: #000;
     }
     .hud-btn:active {
-      transform: scale(0.95);
+      transform: scale(0.96);
     }
   </style>
 
@@ -67,8 +91,12 @@
 </head>
 <body>
 
+  <!-- HUD RETTANGOLARE SULLA SINISTRA -->
   <div id="ui-overlay">
-    <div>Punti: <span id="score">0</span></div>
+    <div class="hud-header">WebXR Shooter</div>
+    <div class="hud-version">Versione: v1.3.0</div>
+    <div class="hud-score">Punti: <span id="score">0</span></div>
+    
     <div id="hud-controls">
       <button class="hud-btn" id="btn-pitch-down">Inclina Avanti ⤵</button>
       <button class="hud-btn" id="btn-pitch-up">Inclina Indietro ⤴</button>
@@ -86,7 +114,7 @@
     let bullets = [];
     let targets = [];
     let score = 0;
-    let currentGunPitch = 0; // Angolo di inclinazione corrente in radianti
+    let currentGunPitch = 0;
     const clock = new THREE.Clock();
 
     init();
@@ -108,29 +136,24 @@
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
 
-      // 4. Griglia Pavimento
-      const grid = new THREE.GridHelper(20, 20, 0x00ffcc, 0x333333);
-      grid.position.y = 0;
-      scene.add(grid);
-
-      // 5. Renderer WebGL + WebXR
+      // 4. Renderer WebGL + WebXR
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // 6. Bottoni di ingresso VR e AR
+      // 5. Bottoni di ingresso VR e AR
       document.body.appendChild(VRButton.createButton(renderer));
       document.body.appendChild(ARButton.createButton(renderer));
 
-      // 7. Setup Controller e Pistola
+      // 6. Setup Controller e Pistola
       setupControllers();
 
-      // 8. Eventi Pulsanti HUD per Rotazione Pistola
+      // 7. Eventi Pulsanti HUD per Rotazione Pistola
       setupHudControls();
 
-      // 9. Spawna bersagli vicino al pavimento
+      // 8. Spawna bersagli vicino al pavimento
       for (let i = 0; i < 8; i++) {
         spawnTarget();
       }
@@ -202,7 +225,6 @@
       for (let i = 0; i < 2; i++) {
         const controller = renderer.xr.getController(i);
 
-        // Creiamo un gruppo Pivot per gestire la rotazione dinamica
         const pivot = new THREE.Group();
         const gun = createRedGunModel();
         
@@ -218,15 +240,15 @@
     }
 
     function setupHudControls() {
-      const step = THREE.MathUtils.degToRad(5); // Inclinazione di 5 gradi a ogni click
+      const step = THREE.MathUtils.degToRad(5);
 
       document.getElementById('btn-pitch-down').addEventListener('click', () => {
-        currentGunPitch += step; // Ruota in avanti (verso il basso)
+        currentGunPitch += step;
         updateGunRotation();
       });
 
       document.getElementById('btn-pitch-up').addEventListener('click', () => {
-        currentGunPitch -= step; // Ruota indietro (verso l'alto)
+        currentGunPitch -= step;
         updateGunRotation();
       });
     }
@@ -244,20 +266,19 @@
       const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
       const bullet = new THREE.Mesh(bulletGeo, bulletMat);
 
-      // Calcola posizione di sparo considerando l'orientamento attuale della pistola
       const pivot = controller.children.find(c => gunPivots.includes(c));
       
       if (pivot) {
         pivot.getWorldPosition(bullet.position);
 
-        // Ricava la direzione in avanti (-Z) inclusa la rotazione custom applicata al pivot
         const direction = new THREE.Vector3(0, 0, -1);
         const worldQuaternion = new THREE.Quaternion();
         pivot.getWorldQuaternion(worldQuaternion);
         direction.applyQuaternion(worldQuaternion);
 
+        // Velocità incrementata da 18 a 45 m/s
         bullet.userData = {
-          velocity: direction.multiplyScalar(18),
+          velocity: direction.multiplyScalar(45),
           life: 0
         };
 
