@@ -65,7 +65,7 @@
     const clock = new THREE.Clock();
 
     // ==========================================
-    // MINIGAME 1: COLOR PYRAMID (Subtle Wobble)
+    // MINIGAME 1: COLOR PYRAMID
     // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
@@ -148,7 +148,6 @@
 
             cube.position.set(baseX, baseY, baseZ);
 
-            // Wobble più contenuto
             cube.userData = { 
               colorInfo: chosenColor, 
               active: true,
@@ -619,13 +618,13 @@
     }
 
     // ==========================================
-    // MINIGAME 4: COLOR MEMORY (4x4 Memory Game)
+    // MINIGAME 4: COLOR MEMORY (4x4 Memory Game - Fast Flip, 45s)
     // ==========================================
     class MiniGame4 {
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Color Memory";
-        this.duration = 60;
+        this.duration = 45; // Impostato a 45 secondi
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
@@ -635,7 +634,6 @@
         this.isChecking = false;
         this.matchedPairsCount = 0;
 
-        // 8 Colori distinti (Aggiunto il Bianco)
         this.colorPalette = [
           { name: 'Yellow', hex: 0xffff00 },
           { name: 'Green',  hex: 0x00ff00 },
@@ -663,14 +661,12 @@
       }
 
       createMemoryBoard() {
-        // Prepara 8 coppie di colori (16 elementi in totale)
         let colorPairs = [];
         this.colorPalette.forEach(c => {
           colorPairs.push(c);
           colorPairs.push(c);
         });
 
-        // Mescola i colori in modo casuale
         for (let i = colorPairs.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [colorPairs[i], colorPairs[j]] = [colorPairs[j], colorPairs[i]];
@@ -681,7 +677,6 @@
         const startY = 1.35;
         const geo = new THREE.BoxGeometry(0.28, 0.28, 0.03);
 
-        // Materiale Fronte (Retro del tesserino coperto)
         const frontCanvas = document.createElement('canvas');
         frontCanvas.width = 128; frontCanvas.height = 128;
         const fCtx = frontCanvas.getContext('2d');
@@ -697,7 +692,6 @@
           const col = i % 4;
           const colorObj = colorPairs[i];
 
-          // Materiali multi-faccia (Material 4 = Fronte, Material 5 = Retro svelato)
           const backMat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.3 });
           const frontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.3 });
           const sideMat = new THREE.MeshStandardMaterial({ color: 0x051015, roughness: 0.5 });
@@ -728,7 +722,6 @@
         const tile = this.tiles.find(t => t === hitObject);
         if (!tile || tile.userData.isFlipped || tile.userData.isMatched) return { points: 0, combo: 1 };
 
-        // Giriamo la tessera svelando il colore sul retro
         tile.userData.isFlipped = true;
         tile.userData.targetRotationY = Math.PI;
         this.flippedTiles.push(tile);
@@ -738,7 +731,6 @@
           const [t1, t2] = this.flippedTiles;
 
           if (t1.userData.colorInfo.hex === t2.userData.colorInfo.hex) {
-            // MATCH CORRETTO
             this.matchedPairsCount++;
             setTimeout(() => {
               if (this.isGameOver) return;
@@ -755,7 +747,6 @@
               this.flippedTiles = [];
               this.isChecking = false;
 
-              // VITTORIA COMPLETA
               if (this.matchedPairsCount === 8) {
                 this.isWon = true;
 
@@ -772,11 +763,10 @@
                   }
                 }, 3000);
               }
-            }, 600);
+            }, 500);
 
             return { points: 200, combo: 1 };
           } else {
-            // MATCH ERRATO: Ricopriamo le tessere
             setTimeout(() => {
               if (this.isGameOver) return;
 
@@ -789,7 +779,7 @@
 
               this.flippedTiles = [];
               this.isChecking = false;
-            }, 1000);
+            }, 800);
 
             return { points: -50, combo: 1 };
           }
@@ -799,10 +789,10 @@
       }
 
       update(delta) {
-        // Animazione di rotazione fluida sulle tessere
+        // Velocizzata la rotazione da 12 a 24 per renderla molto più reattiva
         this.tiles.forEach(t => {
           if (Math.abs(t.rotation.y - t.userData.targetRotationY) > 0.01) {
-            t.rotation.y = THREE.MathUtils.lerp(t.rotation.y, t.userData.targetRotationY, delta * 12);
+            t.rotation.y = THREE.MathUtils.lerp(t.rotation.y, t.userData.targetRotationY, delta * 24);
           } else {
             t.rotation.y = t.userData.targetRotationY;
           }
@@ -1350,7 +1340,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.0.0 (Color Memory Included)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.1.0 (Fast Flip Memory)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
