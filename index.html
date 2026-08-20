@@ -112,38 +112,41 @@
         this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.spheres = [];
 
+        const validColors = this.colorPalette.filter(c => c.points > 0);
+        this.targetColorObj = validColors[Math.floor(Math.random() * validColors.length)];
+        this.targetCube.material.color.setHex(this.targetColorObj.hex);
+
+        const otherColors = this.colorPalette.filter(c => c.hex !== this.targetColorObj.hex);
+
+        const totalSpheres = 21;
+        const indices = Array.from({ length: totalSpheres }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        const targetIndices = new Set(indices.slice(0, 5));
+
         const rows = 6;
         const spacingX = 0.28, spacingY = 0.22;
         const startY = 1.35, centerZ = -2.2;
         const geo = new THREE.SphereGeometry(0.11, 24, 24);
 
+        let sphereCount = 0;
         for (let r = 0; r < rows; r++) {
           const countInRow = r + 1;
           const startX = -((countInRow - 1) * spacingX) / 2;
           for (let c = 0; c < countInRow; c++) {
-            const randomColor = this.getRandomColorObj();
-            const mat = new THREE.MeshStandardMaterial({ color: randomColor.hex, roughness: 0.2, metalness: 0.5 });
+            let chosenColor = targetIndices.has(sphereCount) ? this.targetColorObj : otherColors[Math.floor(Math.random() * otherColors.length)];
+            const mat = new THREE.MeshStandardMaterial({ color: chosenColor.hex, roughness: 0.2, metalness: 0.5 });
             const sphere = new THREE.Mesh(geo, mat);
             sphere.position.set(startX + c * spacingX, startY - r * spacingY, centerZ);
-            sphere.userData = { colorInfo: randomColor, active: true };
+            sphere.userData = { colorInfo: chosenColor, active: true };
             this.scene.add(sphere);
             this.spheres.push(sphere);
+
+            sphereCount++;
           }
         }
-
-        const validSpheres = this.spheres.filter(s => s.userData.colorInfo.points > 0);
-        if (validSpheres.length > 0) {
-          const randomTargetSphere = validSpheres[Math.floor(Math.random() * validSpheres.length)];
-          this.targetColorObj = randomTargetSphere.userData.colorInfo;
-        } else {
-          this.targetColorObj = this.colorPalette[0];
-        }
-
-        this.targetCube.material.color.setHex(this.targetColorObj.hex);
-      }
-
-      getRandomColorObj() {
-        return this.colorPalette[Math.floor(Math.random() * this.colorPalette.length)];
       }
 
       getTargetObjects() {
@@ -356,6 +359,197 @@
       }
     }
 
+    // ==========================================
+    // MINIGAME 3: GRID SLIDER 15 (Classic 15-Puzzle)
+    // ==========================================
+    class MiniGame3 {
+      constructor(sceneRef) {
+        this.scene = sceneRef;
+        this.name = "Grid Slider 15";
+        this.duration = 45;
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.grid = new Array(16).fill(null);
+        this.emptyIndex = 15;
+        this.tiles = [];
+      }
+
+      init() {
+        this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        updateTimerDisplay(this.timeRemaining);
+
+        this.createBoard();
+        this.shuffleBoard(14);
+      }
+
+      getPosForGridIndex(idx) {
+        const row = Math.floor(idx / 4);
+        const col = idx % 4;
+        const spacingX = 0.32;
+        const spacingY = 0.32;
+        const startX = -1.5 * spacingX;
+        const startY = 1.35;
+        return new THREE.Vector3(startX + col * spacingX, startY - row * spacingY, -2.2);
+      }
+
+      createBoard() {
+        const geo = new THREE.BoxGeometry(0.28, 0.28, 0.04);
+        for (let num = 1; num <= 15; num++) {
+          const canvas = document.createElement('canvas');
+          canvas.width = 128; canvas.height = 128;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 128, 128);
+          ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 120, 120);
+          ctx.fillStyle = '#ffea00'; ctx.font = 'bold 54px Arial';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(num.toString(), 64, 64);
+
+          const tex = new THREE.CanvasTexture(canvas);
+          const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3 });
+          const mesh = new THREE.Mesh(geo, mat);
+
+          const initialIdx = num - 1;
+          const pos = this.getPosForGridIndex(initialIdx);
+          mesh.position.copy(pos);
+          mesh.userData = { number: num, gridIdx: initialIdx, targetPos: pos.clone() };
+
+          this.scene.add(mesh);
+          this.tiles.push(mesh);
+          this.grid[initialIdx] = mesh;
+        }
+        this.emptyIndex = 15;
+        this.grid[15] = null;
+      }
+
+      shuffleBoard(movesCount) {
+        let lastMovedIdx = -1;
+        for (let i = 0; i < movesCount; i++) {
+          const validNeighbors = this.getValidNeighbors(this.emptyIndex).filter(idx => idx !== lastMovedIdx);
+          if (validNeighbors.length === 0) continue;
+          const chosenIdx = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
+          this.swapTile(chosenIdx, true);
+          lastMovedIdx = this.emptyIndex;
+        }
+      }
+
+      getValidNeighbors(emptyIdx) {
+        const row = Math.floor(emptyIdx / 4);
+        const col = emptyIdx % 4;
+        const neighbors = [];
+        if (row > 0) neighbors.push(emptyIdx - 4);
+        if (row < 3) neighbors.push(emptyIdx + 4);
+        if (col > 0) neighbors.push(emptyIdx - 1);
+        if (col < 3) neighbors.push(emptyIdx + 1);
+        return neighbors;
+      }
+
+      swapTile(tileGridIdx, instant = false) {
+        const tile = this.grid[tileGridIdx];
+        if (!tile) return;
+
+        const newPos = this.getPosForGridIndex(this.emptyIndex);
+        this.grid[this.emptyIndex] = tile;
+        this.grid[tileGridIdx] = null;
+
+        tile.userData.gridIdx = this.emptyIndex;
+        this.emptyIndex = tileGridIdx;
+
+        if (instant) {
+          tile.position.copy(newPos);
+          tile.userData.targetPos.copy(newPos);
+        } else {
+          tile.userData.targetPos.copy(newPos);
+        }
+      }
+
+      getTargetObjects() {
+        return this.tiles;
+      }
+
+      onHit(hitObject) {
+        if (this.isGameOver) return { points: 0, combo: 1 };
+        const tile = this.tiles.find(t => t === hitObject);
+        if (!tile) return { points: 0, combo: 1 };
+
+        const currentIdx = tile.userData.gridIdx;
+        const neighbors = this.getValidNeighbors(this.emptyIndex);
+
+        if (neighbors.includes(currentIdx)) {
+          this.swapTile(currentIdx, false);
+
+          if (this.checkWin()) {
+            createFloatingText("SOLVED! +1000", new THREE.Vector3(0, 1.4, -2.0));
+            playComboSound(5);
+            setTimeout(() => {
+              if (gameState === 'PLAYING' && !this.isGameOver) {
+                this.shuffleBoard(14);
+              }
+            }, 1000);
+            return { points: 1000, combo: 1 };
+          }
+          return { points: 50, combo: 1 };
+        }
+        return { points: 0, combo: 1 };
+      }
+
+      checkWin() {
+        for (let i = 0; i < 15; i++) {
+          if (!this.grid[i] || this.grid[i].userData.number !== i + 1) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      update(delta) {
+        if (this.isGameOver) return;
+
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          this.tiles.forEach(t => t.visible = false);
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
+        }
+
+        this.tiles.forEach(t => {
+          if (t.position.distanceTo(t.userData.targetPos) > 0.001) {
+            t.position.lerp(t.userData.targetPos, delta * 15);
+          } else {
+            t.position.copy(t.userData.targetPos);
+          }
+        });
+      }
+
+      cleanup() {
+        this.tiles.forEach(t => {
+          this.scene.remove(t);
+          t.geometry.dispose();
+          if (t.material.map) t.material.map.dispose();
+          t.material.dispose();
+        });
+        this.tiles = [];
+        this.grid = new Array(16).fill(null);
+      }
+    }
+
     init();
 
     function init() {
@@ -426,7 +620,7 @@
       create3DTimerDisplay();
       updateGunRotation();
 
-      miniGameList = [MiniGame1, MiniGame2];
+      miniGameList = [MiniGame1, MiniGame2, MiniGame3];
       currentMiniGameIndex = 0;
       gameState = 'LOBBY';
       updateHudTexture();
@@ -560,7 +754,7 @@
         texture.colorSpace = THREE.SRGBColorSpace;
         logoMat.map = texture;
         const aspectRatio = texture.image.width / texture.image.height;
-        const targetHeight = 0.55;
+        const targetHeight = 1.0;
         logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
         logoMat.needsUpdate = true;
       }, undefined, () => {
@@ -572,7 +766,7 @@
         ctx.fillStyle = '#ff2a6d'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('BANG BANG', 256, 110);
         ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 42px Arial'; ctx.fillText('BONANZA', 256, 175);
         logoMat.map = new THREE.CanvasTexture(canvas);
-        logoMesh.scale.set(1.2, 0.6, 1);
+        logoMesh.scale.set(2.0, 1.0, 1);
         logoMat.needsUpdate = true;
       });
     }
@@ -862,7 +1056,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v3.8.0 (Custom Names & ENG)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.0.0 (Grid Slider 15)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
@@ -999,7 +1193,7 @@
           else if (hitBtn.userData.action === 'select_game') { switchNextMiniGame(); }
           else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
         } else if (activeMiniGame && gameState === 'PLAYING') {
-          const hitColorHex = hit.object.material.color.getHex();
+          const hitColorHex = hit.object.material.color ? hit.object.material.color.getHex() : 0x00ffcc;
           const hitResult = activeMiniGame.onHit(hit.object);
 
           if (hitResult.points !== 0) {
