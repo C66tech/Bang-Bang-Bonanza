@@ -53,6 +53,8 @@
     let scene, camera, renderer, controls;
     let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [], floatingTexts = [];
     let score = 0;
+    let maxLives = 3;
+    let currentLives = 3;
     let gameState = 'LOBBY';
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
@@ -63,6 +65,33 @@
     let logoMesh = null;
     let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
     const clock = new THREE.Clock();
+
+    // Funzione globale per gestire la perdita della vita
+    function loseLife() {
+      if (gameState !== 'PLAYING') return;
+      currentLives--;
+      updateHudTexture();
+
+      if (currentLives <= 0) {
+        // Se si perdono le vite durante una mossa attiva (no timeout)
+        if (activeMiniGame && !activeMiniGame.isGameOver) {
+          activeMiniGame.isGameOver = true;
+          
+          if (activeMiniGame.cubes) activeMiniGame.cubes.forEach(c => c.visible = false);
+          if (activeMiniGame.tiles) activeMiniGame.tiles.forEach(t => t.visible = false);
+          if (activeMiniGame.targetCube) activeMiniGame.targetCube.visible = false;
+          
+          createFloatingText("OUT OF LIVES!", new THREE.Vector3(0, 1.4, -2.0));
+          playDullSound(1.5);
+          
+          setTimeout(() => {
+            if (gameState === 'PLAYING') stopCurrentGame();
+          }, 2000);
+        }
+      } else {
+        createFloatingText("-1 LIFE", new THREE.Vector3(0, 1.6, -2.0));
+      }
+    }
 
     // ==========================================
     // MINIGAME 1: COLOR PYRAMID
@@ -211,6 +240,8 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
           this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
           if (this.targetCube) this.targetCube.visible = false;
 
@@ -371,6 +402,8 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
           this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
 
           setTimeout(() => {
@@ -417,7 +450,7 @@
     }
 
     // ==========================================
-    // MINIGAME 3: GRID SLIDER 15 (Classic 15-Puzzle)
+    // MINIGAME 3: GRID SLIDER 15
     // ==========================================
     class MiniGame3 {
       constructor(sceneRef) {
@@ -596,6 +629,8 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
           this.tiles.forEach(t => t.visible = false);
 
           setTimeout(() => {
@@ -618,13 +653,13 @@
     }
 
     // ==========================================
-    // MINIGAME 4: COLOR MEMORY (4x4 Memory Game - Fast Flip, 45s)
+    // MINIGAME 4: COLOR MEMORY
     // ==========================================
     class MiniGame4 {
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Color Memory";
-        this.duration = 45; // Impostato a 45 secondi
+        this.duration = 45; 
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
@@ -789,7 +824,6 @@
       }
 
       update(delta) {
-        // Velocizzata la rotazione da 12 a 24 per renderla molto più reattiva
         this.tiles.forEach(t => {
           if (Math.abs(t.rotation.y - t.userData.targetRotationY) > 0.01) {
             t.rotation.y = THREE.MathUtils.lerp(t.rotation.y, t.userData.targetRotationY, delta * 24);
@@ -813,6 +847,8 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
           this.tiles.forEach(t => t.visible = false);
 
           setTimeout(() => {
@@ -920,6 +956,8 @@
       if (activeMiniGame) activeMiniGame.cleanup();
       gameState = 'PLAYING';
       score = 0;
+      currentLives = maxLives; // Ripristina le vite ad ogni nuovo start (per ora)
+      
       if (logoMesh) logoMesh.visible = false;
       if (timerMesh) timerMesh.visible = true;
 
@@ -1340,7 +1378,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.1.0 (Fast Flip Memory)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.2.0 (Lives System)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
@@ -1350,11 +1388,21 @@
       hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; 
       hudCtx.fillText(`${gameIndexLabel}: ${selectedName}`, 28, 155);
 
-      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; 
-      hudCtx.fillText('Score: ' + score, 28, 220);
+      // Rendering delle Vite (Lives)
+      hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial';
+      let livesText = '';
+      for (let i = 0; i < maxLives; i++) {
+         livesText += (i < currentLives) ? '♥ ' : '♡ '; 
+      }
+      hudCtx.fillText('Lives: ' + livesText, 28, 195);
 
+      // Score
+      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; 
+      hudCtx.fillText('Score: ' + score, 28, 240);
+
+      // Pitch
       hudCtx.fillStyle = '#ffb703'; hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Pitch: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 275);
+      hudCtx.fillText('Pitch: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 285);
 
       hudTexture.needsUpdate = true;
     }
@@ -1496,7 +1544,13 @@
             }
 
             score += hitResult.points;
-            updateHudTexture();
+            
+            // Scalare una vita se i punti sono negativi
+            if (hitResult.points < 0) {
+              loseLife();
+            } else {
+              updateHudTexture();
+            }
           }
         }
       }
