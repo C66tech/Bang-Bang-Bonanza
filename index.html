@@ -366,10 +366,11 @@
       constructor(sceneRef) {
         this.scene = sceneRef;
         this.name = "Grid Slider 15";
-        this.duration = 60; // Esteso a 60 secondi
+        this.duration = 60;
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
+        this.isWon = false; // Stato di vittoria
         this.grid = new Array(16).fill(null);
         this.emptyIndex = 15;
         this.tiles = [];
@@ -380,6 +381,7 @@
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
+        this.isWon = false;
         updateTimerDisplay(this.timeRemaining);
 
         this.createBoard();
@@ -471,7 +473,7 @@
       }
 
       onHit(hitObject) {
-        if (this.isGameOver) return { points: 0, combo: 1 };
+        if (this.isGameOver || this.isWon) return { points: 0, combo: 1 };
         const tile = this.tiles.find(t => t === hitObject);
         if (!tile) return { points: 0, combo: 1 };
 
@@ -482,17 +484,23 @@
           this.swapTile(currentIdx, false);
 
           if (this.checkWin()) {
-            // Calcolo del bonus proporzionale al tempo rimanente (100 punti al secondo)
-            const timeBonus = Math.floor(Math.max(0, this.timeRemaining)) * 100;
+            this.isWon = true; // Congela il timer e impedisce altre mosse
+
+            const secondsLeft = Math.floor(Math.max(0, this.timeRemaining));
+            const timeBonus = secondsLeft * 100;
             const totalPoints = 1000 + timeBonus;
 
-            createFloatingText(`SOLVED! +${totalPoints}`, new THREE.Vector3(0, 1.4, -2.0));
+            // Mostra la scritta con il bonus del tempo rimanente
+            createFloatingText(`TIME BONUS: +${timeBonus}`, new THREE.Vector3(0, 1.4, -2.0));
             playComboSound(5);
+
+            // Attesa di 3 secondi, poi ritorno alla lobby
             setTimeout(() => {
-              if (gameState === 'PLAYING' && !this.isGameOver) {
-                this.shuffleBoard(14);
+              if (gameState === 'PLAYING') {
+                stopCurrentGame();
               }
-            }, 1000);
+            }, 3000);
+
             return { points: totalPoints, combo: 1 };
           }
           return { points: 50, combo: 1 };
@@ -510,7 +518,17 @@
       }
 
       update(delta) {
-        if (this.isGameOver) return;
+        // Continuante ad animare lo scorrimento fluido delle tessere anche dopo la vittoria
+        this.tiles.forEach(t => {
+          if (t.position.distanceTo(t.userData.targetPos) > 0.001) {
+            t.position.lerp(t.userData.targetPos, delta * 15);
+          } else {
+            t.position.copy(t.userData.targetPos);
+          }
+        });
+
+        // Se il gioco è finito o vinto, il timer non scala più
+        if (this.isGameOver || this.isWon) return;
 
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
@@ -532,14 +550,6 @@
           }, 2000);
           return;
         }
-
-        this.tiles.forEach(t => {
-          if (t.position.distanceTo(t.userData.targetPos) > 0.001) {
-            t.position.lerp(t.userData.targetPos, delta * 15);
-          } else {
-            t.position.copy(t.userData.targetPos);
-          }
-        });
       }
 
       cleanup() {
@@ -702,7 +712,7 @@
       const ctx = canvas.getContext('2d');
 
       ctx.fillStyle = '#ffea00';
-      ctx.font = 'bold 30px Arial';
+      ctx.font = 'bold 28px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.strokeStyle = '#000000';
@@ -722,7 +732,7 @@
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(position);
 
-      mesh.userData = { life: 0.8, initialLife: 0.8 };
+      mesh.userData = { life: 1.2, initialLife: 1.2 };
       scene.add(mesh);
       floatingTexts.push(mesh);
     }
@@ -739,18 +749,17 @@
           ft.material.dispose();
           floatingTexts.splice(i, 1);
         } else {
-          ft.position.y += 0.5 * delta;
+          ft.position.y += 0.4 * delta;
           ft.material.opacity = ft.userData.life / ft.userData.initialLife;
         }
       }
     }
 
-    // LOGO NELLA LOBBY: AVVICINATO (z = -1.6) E ALTEZZA 1.2 METRI
     function createPresentationLogo() {
       const logoGeo = new THREE.PlaneGeometry(1, 1);
       const logoMat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.05, side: THREE.DoubleSide });
       logoMesh = new THREE.Mesh(logoGeo, logoMat);
-      logoMesh.position.set(0, 1.45, -1.6); // Avvicinato da -2.0 a -1.6
+      logoMesh.position.set(0, 1.45, -1.6);
       logoMesh.visible = (gameState === 'LOBBY');
       scene.add(logoMesh);
 
@@ -759,7 +768,7 @@
         texture.colorSpace = THREE.SRGBColorSpace;
         logoMat.map = texture;
         const aspectRatio = texture.image.width / texture.image.height;
-        const targetHeight = 1.2; // Altezza impostata a 1.2 metri
+        const targetHeight = 1.2;
         logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
         logoMat.needsUpdate = true;
       }, undefined, () => {
@@ -771,7 +780,7 @@
         ctx.fillStyle = '#ff2a6d'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('BANG BANG', 256, 110);
         ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 42px Arial'; ctx.fillText('BONANZA', 256, 175);
         logoMat.map = new THREE.CanvasTexture(canvas);
-        logoMesh.scale.set(2.4, 1.2, 1); // Fallback scala 1.2m
+        logoMesh.scale.set(2.4, 1.2, 1);
         logoMat.needsUpdate = true;
       });
     }
@@ -1061,7 +1070,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.1.0 (Timer Bonus & Big Logo)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.2.0 (Win Freeze & Lobby Return)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
