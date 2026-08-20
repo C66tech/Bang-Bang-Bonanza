@@ -64,6 +64,9 @@
     let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
     const clock = new THREE.Clock();
 
+    // ==========================================
+    // NUOVO MINIGIOCO 1 (Triangolo + Cubo Riferimento)
+    // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -73,6 +76,8 @@
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
         this.spheres = [];
+        this.targetCube = null;
+        this.targetColorObj = null;
         this.colorPalette = [
           { name: 'Giallo', hex: 0xffff00, points: 100 },
           { name: 'Verde',  hex: 0x00ff00, points: 100 },
@@ -91,22 +96,52 @@
         this.isGameOver = false;
         updateTimerDisplay(this.timeRemaining);
 
-        const rows = 3, cols = 3, spacingX = 0.45, spacingY = 0.30;
-        const startX = -((cols - 1) * spacingX) / 2;
-        const startY = 0.60, centerZ = -2.2;
-        const geo = new THREE.SphereGeometry(0.14, 24, 24);
+        this.createTargetCubeMesh();
+        this.generateWave();
+      }
+
+      createTargetCubeMesh() {
+        const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+        const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
+        this.targetCube = new THREE.Mesh(geo, mat);
+        this.targetCube.position.set(1.2, 0.95, -2.0); // Posizionato sulla destra
+        this.scene.add(this.targetCube);
+      }
+
+      generateWave() {
+        this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.spheres = [];
+
+        // Generazione Triangolo: 6 righe (1, 2, 3, 4, 5, 6)
+        const rows = 6;
+        const spacingX = 0.28, spacingY = 0.22;
+        const startY = 1.35, centerZ = -2.2;
+        const geo = new THREE.SphereGeometry(0.11, 24, 24);
 
         for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
+          const countInRow = r + 1;
+          const startX = -((countInRow - 1) * spacingX) / 2;
+          for (let c = 0; c < countInRow; c++) {
             const randomColor = this.getRandomColorObj();
             const mat = new THREE.MeshStandardMaterial({ color: randomColor.hex, roughness: 0.2, metalness: 0.5 });
             const sphere = new THREE.Mesh(geo, mat);
-            sphere.position.set(startX + c * spacingX, startY + r * spacingY, centerZ);
+            sphere.position.set(startX + c * spacingX, startY - r * spacingY, centerZ);
             sphere.userData = { colorInfo: randomColor, active: true };
             this.scene.add(sphere);
             this.spheres.push(sphere);
           }
         }
+
+        // Selezione colore del cubo di riferimento tra quelli presenti nella griglia
+        const validSpheres = this.spheres.filter(s => s.userData.colorInfo.points > 0);
+        if (validSpheres.length > 0) {
+          const randomTargetSphere = validSpheres[Math.floor(Math.random() * validSpheres.length)];
+          this.targetColorObj = randomTargetSphere.userData.colorInfo;
+        } else {
+          this.targetColorObj = this.colorPalette[0];
+        }
+
+        this.targetCube.material.color.setHex(this.targetColorObj.hex);
       }
 
       getRandomColorObj() {
@@ -121,20 +156,25 @@
         if (this.isGameOver) return { points: 0, combo: 1 };
         const sphere = this.spheres.find(s => s === hitObject);
         if (!sphere || !sphere.userData.active || !sphere.visible) return { points: 0, combo: 1 };
-        const points = sphere.userData.colorInfo.points;
+
         sphere.userData.active = false;
         sphere.visible = false;
 
-        setTimeout(() => {
-          if (this.spheres.includes(sphere) && gameState === 'PLAYING' && !this.isGameOver) {
-            const newColor = this.getRandomColorObj();
-            sphere.userData.colorInfo = newColor;
-            sphere.material.color.setHex(newColor.hex);
-            sphere.userData.active = true;
-            sphere.visible = true;
-          }
-        }, 2000);
-        return { points: points, combo: 1 };
+        const isCorrect = (sphere.userData.colorInfo.hex === this.targetColorObj.hex);
+        const earnedPoints = isCorrect ? 100 : -100;
+
+        // Controllo se sono state esaurite tutte le sfere del colore target
+        const remainingTargetSpheres = this.spheres.filter(s => s.userData.active && s.visible && s.userData.colorInfo.hex === this.targetColorObj.hex);
+
+        if (remainingTargetSpheres.length === 0) {
+          setTimeout(() => {
+            if (gameState === 'PLAYING' && !this.isGameOver) {
+              this.generateWave();
+            }
+          }, 300);
+        }
+
+        return { points: earnedPoints, combo: 1 };
       }
 
       update(delta) {
@@ -154,6 +194,7 @@
           updateTimerDisplay(0);
           playBellSound();
           this.spheres.forEach(s => { s.userData.active = false; s.visible = false; });
+          if (this.targetCube) this.targetCube.visible = false;
 
           setTimeout(() => {
             stopCurrentGame();
@@ -162,14 +203,27 @@
         }
 
         this.spheres.forEach(s => { if (s.userData.active && s.visible) s.rotation.y += 0.8 * delta; });
+        if (this.targetCube && this.targetCube.visible) {
+          this.targetCube.rotation.y += 1.2 * delta;
+          this.targetCube.rotation.x += 0.6 * delta;
+        }
       }
 
       cleanup() {
         this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.spheres = [];
+        if (this.targetCube) {
+          this.scene.remove(this.targetCube);
+          this.targetCube.geometry.dispose();
+          this.targetCube.material.dispose();
+          this.targetCube = null;
+        }
       }
     }
 
+    // ==========================================
+    // MINIGIOCO 2 (6 Sfere + Combo dello Stesso Colore)
+    // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
@@ -446,7 +500,6 @@
       timerTexture.needsUpdate = true;
     }
 
-    // CREAZIONE TESTO COMBO PIÙ PICCOLO (0.4 x 0.2m)
     function createFloatingText(text, position) {
       const canvas = document.createElement('canvas');
       canvas.width = 256;
@@ -470,7 +523,7 @@
         side: THREE.DoubleSide
       });
 
-      const geo = new THREE.PlaneGeometry(0.4, 0.2); // Dimensione ridotta
+      const geo = new THREE.PlaneGeometry(0.4, 0.2);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(position);
 
@@ -532,7 +585,6 @@
       if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
-    // NUOVO SUONO COMBO (ARPEGGIO BRILLANTE)
     function playComboSound(comboMultiplier) {
       initAudio();
       if (!audioCtx) return;
@@ -813,7 +865,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.6.0 (Combo FX & Sound)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.7.0 (Triangle Mode)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
       const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
@@ -949,7 +1001,6 @@
             playPopSound(hitResult.points < 0, true);
             createExplosion(hit.point, hitColorHex);
 
-            // Esecuzione effetto sonoro e animazione grafica per combo > 1
             if (hitResult.combo > 1) {
               createFloatingText("Combo X" + hitResult.combo, hit.point.clone());
               playComboSound(hitResult.combo);
