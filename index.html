@@ -50,7 +50,7 @@
     import { ARButton } from 'three/addons/webxr/ARButton.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    let scene, camera, renderer, controls, floorWireframe;
+    let scene, camera, renderer, controls;
     let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [], floatingTexts = [];
     let score = 0;
     let gameState = 'LOBBY';
@@ -65,7 +65,7 @@
     const clock = new THREE.Clock();
 
     // ==========================================
-    // MINIGAME 1: COLOR PYRAMID (Wobbling Cubes)
+    // MINIGAME 1: COLOR PYRAMID (Subtle Wobble)
     // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
@@ -106,7 +106,6 @@
         const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
         const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
         this.targetCube = new THREE.Mesh(geo, mat);
-        // Posizionato sopra il vertice della piramide senza intersecare
         this.targetCube.position.set(0.0, 1.70, -2.2);
         this.scene.add(this.targetCube);
       }
@@ -149,15 +148,15 @@
 
             cube.position.set(baseX, baseY, baseZ);
 
-            // Proprietà dedicate al Wobble
+            // Wobble più contenuto
             cube.userData = { 
               colorInfo: chosenColor, 
               active: true,
               basePos: new THREE.Vector3(baseX, baseY, baseZ),
               wobblePhase: Math.random() * Math.PI * 2,
-              wobbleSpeed: 4.0 + Math.random() * 3.0,
-              wobbleAmpRot: 0.15 + Math.random() * 0.1,  // Ampiezza d'inclinazione in radianti
-              wobbleAmpPos: 0.015 + Math.random() * 0.01  // Ampiezza di galleggiamento
+              wobbleSpeed: 3.0 + Math.random() * 2.0,
+              wobbleAmpRot: 0.08 + Math.random() * 0.05,
+              wobbleAmpPos: 0.008 + Math.random() * 0.005
             };
 
             this.scene.add(cube);
@@ -222,29 +221,25 @@
           return;
         }
 
-        // Animazione Wobble per i cubi
         this.cubes.forEach(cube => {
           if (cube.userData.active && cube.visible) {
             const ud = cube.userData;
             const t = (this.elapsedGameTime * ud.wobbleSpeed) + ud.wobblePhase;
 
-            // Oscillazione d'inclinazione (Wobble)
             cube.rotation.x = Math.sin(t) * ud.wobbleAmpRot;
             cube.rotation.z = Math.cos(t * 0.8) * ud.wobbleAmpRot;
             cube.rotation.y = Math.sin(t * 0.5) * (ud.wobbleAmpRot * 0.5);
 
-            // Leggero galleggiamento verticale/orizzontale
             cube.position.y = ud.basePos.y + Math.sin(t * 1.2) * ud.wobbleAmpPos;
             cube.position.x = ud.basePos.x + Math.cos(t * 0.9) * (ud.wobbleAmpPos * 0.5);
           }
         });
 
-        // Il cubo di riferimento wobble anche lui dolcemente sopra la cima
         if (this.targetCube && this.targetCube.visible) {
-          const targetT = this.elapsedGameTime * 3.5;
-          this.targetCube.rotation.x = Math.sin(targetT) * 0.12;
-          this.targetCube.rotation.z = Math.cos(targetT * 0.7) * 0.12;
-          this.targetCube.position.y = 1.70 + Math.sin(targetT * 1.5) * 0.02;
+          const targetT = this.elapsedGameTime * 2.5;
+          this.targetCube.rotation.x = Math.sin(targetT) * 0.08;
+          this.targetCube.rotation.z = Math.cos(targetT * 0.7) * 0.08;
+          this.targetCube.position.y = 1.70 + Math.sin(targetT * 1.2) * 0.01;
         }
       }
 
@@ -319,9 +314,9 @@
             active: true,
             basePos: new THREE.Vector3(baseX, baseY, posZ),
             wobblePhase: i * 0.8,
-            wobbleSpeed: 5.0,
-            wobbleAmpRot: 0.18,
-            wobbleAmpPos: 0.02
+            wobbleSpeed: 3.5,
+            wobbleAmpRot: 0.08,
+            wobbleAmpPos: 0.01
           };
           this.scene.add(cube);
           this.cubes.push(cube);
@@ -405,7 +400,6 @@
           });
         }
 
-        // Animazione Wobble per i cubi
         this.cubes.forEach(c => {
           if (c.visible) {
             const ud = c.userData;
@@ -624,6 +618,239 @@
       }
     }
 
+    // ==========================================
+    // MINIGAME 4: COLOR MEMORY (4x4 Memory Game)
+    // ==========================================
+    class MiniGame4 {
+      constructor(sceneRef) {
+        this.scene = sceneRef;
+        this.name = "Color Memory";
+        this.duration = 60;
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.isWon = false;
+        this.tiles = [];
+        this.flippedTiles = [];
+        this.isChecking = false;
+        this.matchedPairsCount = 0;
+
+        // 8 Colori distinti (Aggiunto il Bianco)
+        this.colorPalette = [
+          { name: 'Yellow', hex: 0xffff00 },
+          { name: 'Green',  hex: 0x00ff00 },
+          { name: 'Red',    hex: 0xff0000 },
+          { name: 'Blue',   hex: 0x0066ff },
+          { name: 'Orange', hex: 0xff8800 },
+          { name: 'Purple', hex: 0x9900ff },
+          { name: 'Black',  hex: 0x111111 },
+          { name: 'White',  hex: 0xffffff }
+        ];
+      }
+
+      init() {
+        this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.isWon = false;
+        this.flippedTiles = [];
+        this.isChecking = false;
+        this.matchedPairsCount = 0;
+        updateTimerDisplay(this.timeRemaining);
+
+        this.createMemoryBoard();
+      }
+
+      createMemoryBoard() {
+        // Prepara 8 coppie di colori (16 elementi in totale)
+        let colorPairs = [];
+        this.colorPalette.forEach(c => {
+          colorPairs.push(c);
+          colorPairs.push(c);
+        });
+
+        // Mescola i colori in modo casuale
+        for (let i = colorPairs.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [colorPairs[i], colorPairs[j]] = [colorPairs[j], colorPairs[i]];
+        }
+
+        const spacingX = 0.32, spacingY = 0.32;
+        const startX = -1.5 * spacingX;
+        const startY = 1.35;
+        const geo = new THREE.BoxGeometry(0.28, 0.28, 0.03);
+
+        // Materiale Fronte (Retro del tesserino coperto)
+        const frontCanvas = document.createElement('canvas');
+        frontCanvas.width = 128; frontCanvas.height = 128;
+        const fCtx = frontCanvas.getContext('2d');
+        fCtx.fillStyle = '#0d222a'; fCtx.fillRect(0, 0, 128, 128);
+        fCtx.strokeStyle = '#00ffcc'; fCtx.lineWidth = 6; fCtx.strokeRect(4, 4, 120, 120);
+        fCtx.fillStyle = '#00ffcc'; fCtx.font = 'bold 50px Arial';
+        fCtx.textAlign = 'center'; fCtx.textBaseline = 'middle';
+        fCtx.fillText('?', 64, 64);
+        const frontTex = new THREE.CanvasTexture(frontCanvas);
+
+        for (let i = 0; i < 16; i++) {
+          const row = Math.floor(i / 4);
+          const col = i % 4;
+          const colorObj = colorPairs[i];
+
+          // Materiali multi-faccia (Material 4 = Fronte, Material 5 = Retro svelato)
+          const backMat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.3 });
+          const frontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.3 });
+          const sideMat = new THREE.MeshStandardMaterial({ color: 0x051015, roughness: 0.5 });
+
+          const materials = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
+          const tile = new THREE.Mesh(geo, materials);
+
+          tile.position.set(startX + col * spacingX, startY - row * spacingY, -2.2);
+          tile.userData = {
+            id: i,
+            colorInfo: colorObj,
+            isFlipped: false,
+            isMatched: false,
+            targetRotationY: 0
+          };
+
+          this.scene.add(tile);
+          this.tiles.push(tile);
+        }
+      }
+
+      getTargetObjects() {
+        return this.tiles.filter(t => !t.userData.isMatched && !t.userData.isFlipped);
+      }
+
+      onHit(hitObject) {
+        if (this.isGameOver || this.isWon || this.isChecking) return { points: 0, combo: 1 };
+        const tile = this.tiles.find(t => t === hitObject);
+        if (!tile || tile.userData.isFlipped || tile.userData.isMatched) return { points: 0, combo: 1 };
+
+        // Giriamo la tessera svelando il colore sul retro
+        tile.userData.isFlipped = true;
+        tile.userData.targetRotationY = Math.PI;
+        this.flippedTiles.push(tile);
+
+        if (this.flippedTiles.length === 2) {
+          this.isChecking = true;
+          const [t1, t2] = this.flippedTiles;
+
+          if (t1.userData.colorInfo.hex === t2.userData.colorInfo.hex) {
+            // MATCH CORRETTO
+            this.matchedPairsCount++;
+            setTimeout(() => {
+              if (this.isGameOver) return;
+
+              t1.userData.isMatched = true;
+              t2.userData.isMatched = true;
+              t1.visible = false;
+              t2.visible = false;
+
+              createExplosion(t1.position, t1.userData.colorInfo.hex);
+              createExplosion(t2.position, t2.userData.colorInfo.hex);
+              playPopSound(false, true);
+
+              this.flippedTiles = [];
+              this.isChecking = false;
+
+              // VITTORIA COMPLETA
+              if (this.matchedPairsCount === 8) {
+                this.isWon = true;
+
+                const secondsLeft = Math.floor(Math.max(0, this.timeRemaining));
+                const timeBonus = secondsLeft * 100;
+                const totalPoints = 1000 + timeBonus;
+
+                createFloatingText(`TIME BONUS: +${timeBonus}`, new THREE.Vector3(0, 1.4, -2.0));
+                playComboSound(5);
+
+                setTimeout(() => {
+                  if (gameState === 'PLAYING') {
+                    stopCurrentGame();
+                  }
+                }, 3000);
+              }
+            }, 600);
+
+            return { points: 200, combo: 1 };
+          } else {
+            // MATCH ERRATO: Ricopriamo le tessere
+            setTimeout(() => {
+              if (this.isGameOver) return;
+
+              t1.userData.isFlipped = false;
+              t2.userData.isFlipped = false;
+              t1.userData.targetRotationY = 0;
+              t2.userData.targetRotationY = 0;
+
+              playPopSound(true, false);
+
+              this.flippedTiles = [];
+              this.isChecking = false;
+            }, 1000);
+
+            return { points: -50, combo: 1 };
+          }
+        }
+
+        return { points: 0, combo: 1 };
+      }
+
+      update(delta) {
+        // Animazione di rotazione fluida sulle tessere
+        this.tiles.forEach(t => {
+          if (Math.abs(t.rotation.y - t.userData.targetRotationY) > 0.01) {
+            t.rotation.y = THREE.MathUtils.lerp(t.rotation.y, t.userData.targetRotationY, delta * 12);
+          } else {
+            t.rotation.y = t.userData.targetRotationY;
+          }
+        });
+
+        if (this.isGameOver || this.isWon) return;
+
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          this.tiles.forEach(t => t.visible = false);
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
+        }
+      }
+
+      cleanup() {
+        this.tiles.forEach(t => {
+          this.scene.remove(t);
+          t.geometry.dispose();
+          if (Array.isArray(t.material)) {
+            t.material.forEach(m => {
+              if (m.map) m.map.dispose();
+              m.dispose();
+            });
+          } else {
+            if (t.material.map) t.material.map.dispose();
+            t.material.dispose();
+          }
+        });
+        this.tiles = [];
+        this.flippedTiles = [];
+      }
+    }
+
     init();
 
     function init() {
@@ -640,13 +867,6 @@
       const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
       dirLight.position.set(5, 10, 7);
       scene.add(dirLight);
-
-      const floorGeo = new THREE.PlaneGeometry(10, 10, 20, 20);
-      floorGeo.rotateX(-Math.PI / 2);
-      const floorMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, wireframe: true, transparent: true, opacity: 0.7 });
-      floorWireframe = new THREE.Mesh(floorGeo, floorMat);
-      floorWireframe.position.y = 0;
-      scene.add(floorWireframe);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(window.devicePixelRatio);
@@ -694,7 +914,7 @@
       create3DTimerDisplay();
       updateGunRotation();
 
-      miniGameList = [MiniGame1, MiniGame2, MiniGame3];
+      miniGameList = [MiniGame1, MiniGame2, MiniGame3, MiniGame4];
       currentMiniGameIndex = 0;
       gameState = 'LOBBY';
       updateHudTexture();
@@ -1130,7 +1350,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.5.0 (Wobble Animation)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.0.0 (Color Memory Included)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
@@ -1267,7 +1487,13 @@
           else if (hitBtn.userData.action === 'select_game') { switchNextMiniGame(); }
           else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
         } else if (activeMiniGame && gameState === 'PLAYING') {
-          const hitColorHex = hit.object.material.color ? hit.object.material.color.getHex() : 0x00ffcc;
+          let hitColorHex = 0x00ffcc;
+          if (hit.object.userData && hit.object.userData.colorInfo) {
+            hitColorHex = hit.object.userData.colorInfo.hex;
+          } else if (hit.object.material.color) {
+            hitColorHex = hit.object.material.color.getHex();
+          }
+
           const hitResult = activeMiniGame.onHit(hit.object);
 
           if (hitResult.points !== 0) {
