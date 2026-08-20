@@ -65,7 +65,7 @@
     const clock = new THREE.Clock();
 
     // ==========================================
-    // MINIGAME 1: COLOR PYRAMID (Low-poly Cubes)
+    // MINIGAME 1: COLOR PYRAMID (Wobbling Cubes)
     // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
@@ -78,6 +78,7 @@
         this.cubes = [];
         this.targetCube = null;
         this.targetColorObj = null;
+        this.elapsedGameTime = 0;
         this.colorPalette = [
           { name: 'Yellow', hex: 0xffff00, points: 100 },
           { name: 'Green',  hex: 0x00ff00, points: 100 },
@@ -94,6 +95,7 @@
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
+        this.elapsedGameTime = 0;
         updateTimerDisplay(this.timeRemaining);
 
         this.createTargetCubeMesh();
@@ -104,7 +106,7 @@
         const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
         const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
         this.targetCube = new THREE.Mesh(geo, mat);
-        // Posizionato al centro, sopra la cima della piramide (y = 1.70, z = -2.2)
+        // Posizionato sopra il vertice della piramide senza intersecare
         this.targetCube.position.set(0.0, 1.70, -2.2);
         this.scene.add(this.targetCube);
       }
@@ -140,12 +142,24 @@
             let chosenColor = targetIndices.has(cubeCount) ? this.targetColorObj : otherColors[Math.floor(Math.random() * otherColors.length)];
             const mat = new THREE.MeshStandardMaterial({ color: chosenColor.hex, roughness: 0.2, metalness: 0.5 });
             const cube = new THREE.Mesh(geo, mat);
-            cube.position.set(startX + c * spacingX, startY - r * spacingY, centerZ);
+            
+            const baseX = startX + c * spacingX;
+            const baseY = startY - r * spacingY;
+            const baseZ = centerZ;
+
+            cube.position.set(baseX, baseY, baseZ);
+
+            // Proprietà dedicate al Wobble
             cube.userData = { 
               colorInfo: chosenColor, 
               active: true,
-              rotSpeed: new THREE.Vector3((Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2)
+              basePos: new THREE.Vector3(baseX, baseY, baseZ),
+              wobblePhase: Math.random() * Math.PI * 2,
+              wobbleSpeed: 4.0 + Math.random() * 3.0,
+              wobbleAmpRot: 0.15 + Math.random() * 0.1,  // Ampiezza d'inclinazione in radianti
+              wobbleAmpPos: 0.015 + Math.random() * 0.01  // Ampiezza di galleggiamento
             };
+
             this.scene.add(cube);
             this.cubes.push(cube);
 
@@ -185,6 +199,7 @@
       update(delta) {
         if (this.isGameOver) return;
 
+        this.elapsedGameTime += delta;
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
 
@@ -207,17 +222,29 @@
           return;
         }
 
-        this.cubes.forEach(s => {
-          if (s.userData.active && s.visible) {
-            s.rotation.x += s.userData.rotSpeed.x * delta;
-            s.rotation.y += s.userData.rotSpeed.y * delta;
-            s.rotation.z += s.userData.rotSpeed.z * delta;
+        // Animazione Wobble per i cubi
+        this.cubes.forEach(cube => {
+          if (cube.userData.active && cube.visible) {
+            const ud = cube.userData;
+            const t = (this.elapsedGameTime * ud.wobbleSpeed) + ud.wobblePhase;
+
+            // Oscillazione d'inclinazione (Wobble)
+            cube.rotation.x = Math.sin(t) * ud.wobbleAmpRot;
+            cube.rotation.z = Math.cos(t * 0.8) * ud.wobbleAmpRot;
+            cube.rotation.y = Math.sin(t * 0.5) * (ud.wobbleAmpRot * 0.5);
+
+            // Leggero galleggiamento verticale/orizzontale
+            cube.position.y = ud.basePos.y + Math.sin(t * 1.2) * ud.wobbleAmpPos;
+            cube.position.x = ud.basePos.x + Math.cos(t * 0.9) * (ud.wobbleAmpPos * 0.5);
           }
         });
 
+        // Il cubo di riferimento wobble anche lui dolcemente sopra la cima
         if (this.targetCube && this.targetCube.visible) {
-          this.targetCube.rotation.y += 1.2 * delta;
-          this.targetCube.rotation.x += 0.6 * delta;
+          const targetT = this.elapsedGameTime * 3.5;
+          this.targetCube.rotation.x = Math.sin(targetT) * 0.12;
+          this.targetCube.rotation.z = Math.cos(targetT * 0.7) * 0.12;
+          this.targetCube.position.y = 1.70 + Math.sin(targetT * 1.5) * 0.02;
         }
       }
 
@@ -249,6 +276,7 @@
         this.isWaveActive = true;
         this.lastColorHex = null;
         this.comboStreak = 1;
+        this.elapsedGameTime = 0;
         this.colorPalette = [
           { name: 'Yellow', hex: 0xffff00, points: 100 },
           { name: 'Green',  hex: 0x00ff00, points: 100 },
@@ -269,6 +297,7 @@
         this.isWaveActive = true;
         this.lastColorHex = null;
         this.comboStreak = 1;
+        this.elapsedGameTime = 0;
         updateTimerDisplay(this.timeRemaining);
 
         const count = 6, spacingX = 0.40;
@@ -280,11 +309,19 @@
           const colorObj = this.getRandomColorObj();
           const mat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.5 });
           const cube = new THREE.Mesh(geo, mat);
-          cube.position.set(startX + i * spacingX, posY, posZ);
+          
+          const baseX = startX + i * spacingX;
+          const baseY = posY;
+          cube.position.set(baseX, baseY, posZ);
+
           cube.userData = { 
             colorInfo: colorObj, 
             active: true,
-            rotSpeed: new THREE.Vector3((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, 0)
+            basePos: new THREE.Vector3(baseX, baseY, posZ),
+            wobblePhase: i * 0.8,
+            wobbleSpeed: 5.0,
+            wobbleAmpRot: 0.18,
+            wobbleAmpPos: 0.02
           };
           this.scene.add(cube);
           this.cubes.push(cube);
@@ -326,6 +363,7 @@
       update(delta) {
         if (this.isGameOver) return;
 
+        this.elapsedGameTime += delta;
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
 
@@ -367,10 +405,14 @@
           });
         }
 
+        // Animazione Wobble per i cubi
         this.cubes.forEach(c => {
           if (c.visible) {
-            c.rotation.x += c.userData.rotSpeed.x * delta;
-            c.rotation.y += c.userData.rotSpeed.y * delta;
+            const ud = c.userData;
+            const t = (this.elapsedGameTime * ud.wobbleSpeed) + ud.wobblePhase;
+            c.rotation.x = Math.sin(t) * ud.wobbleAmpRot;
+            c.rotation.z = Math.cos(t * 0.8) * ud.wobbleAmpRot;
+            c.position.y = ud.basePos.y + Math.sin(t * 1.4) * ud.wobbleAmpPos;
           }
         });
       }
@@ -1088,7 +1130,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.4.0 (Centered Target Cube)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v4.5.0 (Wobble Animation)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
