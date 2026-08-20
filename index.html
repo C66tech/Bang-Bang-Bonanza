@@ -8,8 +8,30 @@
   <meta http-equiv="Expires" content="0">
   <title>Bang Bang Bonanza - WebXR Target Shooter</title>
   <style>
-    body { margin: 0; overflow: hidden; background-color: #000; font-family: Arial, sans-serif; }
-    #xr-button-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 1000; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: Arial, sans-serif;
+    }
+
+    #xr-button-container {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 15px;
+      z-index: 1000;
+    }
+
+    #xr-button-container button {
+      position: static !important;
+      left: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      margin: 0 !important;
+    }
   </style>
   <script type="importmap">
     {
@@ -21,15 +43,414 @@
   </script>
 </head>
 <body>
+
   <script type="module">
     import * as THREE from 'three';
     import { VRButton } from 'three/addons/webxr/VRButton.js';
     import { ARButton } from 'three/addons/webxr/ARButton.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // ... [Struttura base identica alla v5.3.0] ...
-    // Ho modificato solo la classe MiniGame3 per il rimescolamento
-    
+    let scene, camera, renderer, controls;
+    let controllers = [], gunPivots = [], laserLines = [], tracers = [], hudButtons = [], explosions = [], floatingTexts = [];
+    let score = 0;
+    let maxLives = 3;
+    let currentLives = 3;
+    let gameState = 'LOBBY';
+    let currentGunPitch = THREE.MathUtils.degToRad(-14);
+    let laserEnabled = true;
+    let activeMiniGame = null, miniGameList = [], currentMiniGameIndex = 0;
+    let audioCtx = null;
+    let hudCanvas, hudCtx, hudTexture;
+    let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
+    let logoMesh = null;
+    let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
+    const clock = new THREE.Clock();
+
+    // Funzione globale per gestire la perdita della vita
+    function loseLife() {
+      if (gameState !== 'PLAYING') return;
+      currentLives--;
+      updateHudTexture();
+
+      if (currentLives <= 0) {
+        if (activeMiniGame && !activeMiniGame.isGameOver) {
+          activeMiniGame.isGameOver = true;
+          
+          if (activeMiniGame.cubes) activeMiniGame.cubes.forEach(c => c.visible = false);
+          if (activeMiniGame.tiles) activeMiniGame.tiles.forEach(t => t.visible = false);
+          if (activeMiniGame.targetCube) activeMiniGame.targetCube.visible = false;
+          
+          createFloatingText("OUT OF LIVES!", new THREE.Vector3(0, 1.4, -2.0));
+          playDullSound(1.5);
+          
+          setTimeout(() => {
+            if (gameState === 'PLAYING') stopCurrentGame();
+          }, 2000);
+        }
+      } else {
+        createFloatingText("-1 LIFE", new THREE.Vector3(0, 1.6, -2.0));
+      }
+    }
+
+    // ==========================================
+    // MINIGAME 1: COLOR PYRAMID
+    // ==========================================
+    class MiniGame1 {
+      constructor(sceneRef) {
+        this.scene = sceneRef;
+        this.name = "Color Pyramid";
+        this.duration = 20;
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.cubes = [];
+        this.targetCube = null;
+        this.targetColorObj = null;
+        this.elapsedGameTime = 0;
+        this.colorPalette = [
+          { name: 'Yellow', hex: 0xffff00, points: 100 },
+          { name: 'Green',  hex: 0x00ff00, points: 100 },
+          { name: 'Red',    hex: 0xff0000, points: 100 },
+          { name: 'Blue',   hex: 0x0066ff, points: 100 },
+          { name: 'Orange', hex: 0xff8800, points: 100 },
+          { name: 'Purple', hex: 0x9900ff, points: 100 },
+          { name: 'Black',  hex: 0x111111, points: -100 }
+        ];
+      }
+
+      init() {
+        this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.elapsedGameTime = 0;
+        updateTimerDisplay(this.timeRemaining);
+
+        this.createTargetCubeMesh();
+        this.generateWave();
+      }
+
+      createTargetCubeMesh() {
+        const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+        const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
+        this.targetCube = new THREE.Mesh(geo, mat);
+        this.targetCube.position.set(0.0, 1.70, -2.2);
+        this.scene.add(this.targetCube);
+      }
+
+      generateWave() {
+        this.cubes.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes = [];
+
+        const validColors = this.colorPalette.filter(c => c.points > 0);
+        this.targetColorObj = validColors[Math.floor(Math.random() * validColors.length)];
+        this.targetCube.material.color.setHex(this.targetColorObj.hex);
+
+        const otherColors = this.colorPalette.filter(c => c.hex !== this.targetColorObj.hex);
+
+        const totalCubes = 21;
+        const indices = Array.from({ length: totalCubes }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        const targetIndices = new Set(indices.slice(0, 5));
+
+        const rows = 6;
+        const spacingX = 0.28, spacingY = 0.22;
+        const startY = 1.35, centerZ = -2.2;
+        const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+
+        let cubeCount = 0;
+        for (let r = 0; r < rows; r++) {
+          const countInRow = r + 1;
+          const startX = -((countInRow - 1) * spacingX) / 2;
+          for (let c = 0; c < countInRow; c++) {
+            let chosenColor = targetIndices.has(cubeCount) ? this.targetColorObj : otherColors[Math.floor(Math.random() * otherColors.length)];
+            const mat = new THREE.MeshStandardMaterial({ color: chosenColor.hex, roughness: 0.2, metalness: 0.5 });
+            const cube = new THREE.Mesh(geo, mat);
+            
+            const baseX = startX + c * spacingX;
+            const baseY = startY - r * spacingY;
+            const baseZ = centerZ;
+
+            cube.position.set(baseX, baseY, baseZ);
+
+            cube.userData = { 
+              colorInfo: chosenColor, 
+              active: true,
+              basePos: new THREE.Vector3(baseX, baseY, baseZ),
+              wobblePhase: Math.random() * Math.PI * 2,
+              wobbleSpeed: 3.0 + Math.random() * 2.0,
+              wobbleAmpRot: 0.08 + Math.random() * 0.05,
+              wobbleAmpPos: 0.008 + Math.random() * 0.005
+            };
+
+            this.scene.add(cube);
+            this.cubes.push(cube);
+
+            cubeCount++;
+          }
+        }
+      }
+
+      getTargetObjects() {
+        return this.cubes.filter(s => s.userData.active && s.visible);
+      }
+
+      onHit(hitObject) {
+        if (this.isGameOver) return { points: 0, combo: 1 };
+        const cube = this.cubes.find(s => s === hitObject);
+        if (!cube || !cube.userData.active || !cube.visible) return { points: 0, combo: 1 };
+
+        cube.userData.active = false;
+        cube.visible = false;
+
+        const isCorrect = (cube.userData.colorInfo.hex === this.targetColorObj.hex);
+        const earnedPoints = isCorrect ? 100 : -100;
+
+        const remainingTargetCubes = this.cubes.filter(s => s.userData.active && s.visible && s.userData.colorInfo.hex === this.targetColorObj.hex);
+
+        if (remainingTargetCubes.length === 0) {
+          setTimeout(() => {
+            if (gameState === 'PLAYING' && !this.isGameOver) {
+              this.generateWave();
+            }
+          }, 300);
+        }
+
+        return { points: earnedPoints, combo: 1 };
+      }
+
+      update(delta) {
+        if (this.isGameOver) return;
+
+        this.elapsedGameTime += delta;
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
+          this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
+          if (this.targetCube) this.targetCube.visible = false;
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
+        }
+
+        this.cubes.forEach(cube => {
+          if (cube.userData.active && cube.visible) {
+            const ud = cube.userData;
+            const t = (this.elapsedGameTime * ud.wobbleSpeed) + ud.wobblePhase;
+
+            cube.rotation.x = Math.sin(t) * ud.wobbleAmpRot;
+            cube.rotation.z = Math.cos(t * 0.8) * ud.wobbleAmpRot;
+            cube.rotation.y = Math.sin(t * 0.5) * (ud.wobbleAmpRot * 0.5);
+
+            cube.position.y = ud.basePos.y + Math.sin(t * 1.2) * ud.wobbleAmpPos;
+            cube.position.x = ud.basePos.x + Math.cos(t * 0.9) * (ud.wobbleAmpPos * 0.5);
+          }
+        });
+
+        if (this.targetCube && this.targetCube.visible) {
+          const targetT = this.elapsedGameTime * 2.5;
+          this.targetCube.rotation.x = Math.sin(targetT) * 0.08;
+          this.targetCube.rotation.z = Math.cos(targetT * 0.7) * 0.08;
+          this.targetCube.position.y = 1.70 + Math.sin(targetT * 1.2) * 0.01;
+        }
+      }
+
+      cleanup() {
+        this.cubes.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes = [];
+        if (this.targetCube) {
+          this.scene.remove(this.targetCube);
+          this.targetCube.geometry.dispose();
+          this.targetCube.material.dispose();
+          this.targetCube = null;
+        }
+      }
+    }
+
+    // ==========================================
+    // MINIGAME 2: COMBO STREAK
+    // ==========================================
+    class MiniGame2 {
+      constructor(sceneRef) {
+        this.sceneRef = sceneRef;
+        this.name = "Combo Streak";
+        this.duration = 20;
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.cubes = [];
+        this.waveTimer = 0;
+        this.isWaveActive = true;
+        this.lastColorHex = null;
+        this.comboStreak = 1;
+        this.elapsedGameTime = 0;
+        this.colorPalette = [
+          { name: 'Yellow', hex: 0xffff00, points: 100 },
+          { name: 'Green',  hex: 0x00ff00, points: 100 },
+          { name: 'Red',    hex: 0xff0000, points: 100 },
+          { name: 'Blue',   hex: 0x0066ff, points: 100 },
+          { name: 'Orange', hex: 0xff8800, points: 100 },
+          { name: 'Purple', hex: 0x9900ff, points: 100 },
+          { name: 'Black',  hex: 0x111111, points: -100 }
+        ];
+      }
+
+      init() {
+        this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.waveTimer = 0;
+        this.isWaveActive = true;
+        this.lastColorHex = null;
+        this.comboStreak = 1;
+        this.elapsedGameTime = 0;
+        updateTimerDisplay(this.timeRemaining);
+
+        const count = 6, spacingX = 0.40;
+        const startX = -((count - 1) * spacingX) / 2;
+        const posY = 0.90, posZ = -2.2;
+        const geo = new THREE.BoxGeometry(0.20, 0.20, 0.20);
+
+        for (let i = 0; i < count; i++) {
+          const colorObj = this.getRandomColorObj();
+          const mat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.5 });
+          const cube = new THREE.Mesh(geo, mat);
+          
+          const baseX = startX + i * spacingX;
+          const baseY = posY;
+          cube.position.set(baseX, baseY, posZ);
+
+          cube.userData = { 
+            colorInfo: colorObj, 
+            active: true,
+            basePos: new THREE.Vector3(baseX, baseY, posZ),
+            wobblePhase: i * 0.8,
+            wobbleSpeed: 3.5,
+            wobbleAmpRot: 0.08,
+            wobbleAmpPos: 0.01
+          };
+          this.sceneRef.add(cube);
+          this.cubes.push(cube);
+        }
+      }
+
+      getRandomColorObj() {
+        return this.colorPalette[Math.floor(Math.random() * this.colorPalette.length)];
+      }
+
+      getTargetObjects() {
+        return this.cubes.filter(s => s.userData.active && s.visible);
+      }
+
+      onHit(hitObject) {
+        if (this.isGameOver) return { points: 0, combo: 1 };
+        const cube = this.cubes.find(s => s === hitObject);
+        if (!cube || !cube.userData.active || !cube.visible) return { points: 0, combo: 1 };
+
+        const colorHex = cube.userData.colorInfo.hex;
+        const basePoints = cube.userData.colorInfo.points;
+
+        if (this.lastColorHex !== null && this.lastColorHex === colorHex && basePoints > 0) {
+          this.comboStreak++;
+        } else {
+          this.lastColorHex = colorHex;
+          this.comboStreak = 1;
+        }
+
+        const multiplier = this.comboStreak;
+        const finalPoints = basePoints * multiplier;
+
+        cube.userData.active = false;
+        cube.visible = false;
+
+        return { points: finalPoints, combo: multiplier };
+      }
+
+      update(delta) {
+        if (this.isGameOver) return;
+
+        this.elapsedGameTime += delta;
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
+          this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
+        }
+
+        this.waveTimer += delta;
+        if (this.isWaveActive && this.waveTimer >= 2.0) {
+          this.isWaveActive = false;
+          this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
+          playDullSound(1.0);
+        } else if (!this.isWaveActive && this.waveTimer >= 3.0) {
+          this.waveTimer = 0;
+          this.isWaveActive = true;
+          this.lastColorHex = null;
+          this.comboStreak = 1;
+
+          this.cubes.forEach(s => {
+            const newColor = this.getRandomColorObj();
+            s.userData.colorInfo = newColor;
+            s.material.color.setHex(newColor.hex);
+            s.userData.active = true;
+            s.visible = true;
+          });
+        }
+
+        this.cubes.forEach(c => {
+          if (c.visible) {
+            const ud = c.userData;
+            const t = (this.elapsedGameTime * ud.wobbleSpeed) + ud.wobblePhase;
+            c.rotation.x = Math.sin(t) * ud.wobbleAmpRot;
+            c.rotation.z = Math.cos(t * 0.8) * ud.wobbleAmpRot;
+            c.position.y = ud.basePos.y + Math.sin(t * 1.4) * ud.wobbleAmpPos;
+          }
+        });
+      }
+
+      cleanup() {
+        this.cubes.forEach(s => { this.sceneRef.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes = [];
+      }
+    }
+
+    // ==========================================
+    // MINIGAME 3: GRID SLIDER 15
+    // ==========================================
     class MiniGame3 {
       constructor(sceneRef) {
         this.sceneRef = sceneRef;
@@ -53,23 +474,28 @@
         updateTimerDisplay(this.timeRemaining);
 
         this.createBoard();
-        // Ritorno al metodo di rimescolamento logico con 25 mosse
-        this.shuffleBoard(25); 
+        this.shuffleBoard(300); // Aumentato a 300 per un rimescolamento completo
+      }
+
+      getPosForGridIndex(idx) {
+        const row = Math.floor(idx / 4);
+        const col = idx % 4;
+        const spacingX = 0.32;
+        const spacingY = 0.32;
+        const startX = -1.5 * spacingX;
+        const startY = 1.35;
+        return new THREE.Vector3(startX + col * spacingX, startY - row * spacingY, -2.2);
       }
 
       createBoard() {
         const geo = new THREE.BoxGeometry(0.28, 0.28, 0.04);
         for (let num = 1; num <= 15; num++) {
-          const isEven = (num % 2 === 0);
-          const bgColor = isEven ? '#ffff00' : '#ff0000';
-          const textColor = isEven ? '#000000' : '#ffffff';
-
           const canvas = document.createElement('canvas');
           canvas.width = 128; canvas.height = 128;
           const ctx = canvas.getContext('2d');
-          ctx.fillStyle = bgColor; ctx.fillRect(0, 0, 128, 128);
-          ctx.strokeStyle = '#111111'; ctx.lineWidth = 8; ctx.strokeRect(4, 4, 120, 120);
-          ctx.fillStyle = textColor; ctx.font = 'bold 54px Arial';
+          ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 128, 128);
+          ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 120, 120);
+          ctx.fillStyle = '#ffea00'; ctx.font = 'bold 54px Arial';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(num.toString(), 64, 64);
 
@@ -101,18 +527,6 @@
         }
       }
 
-      // ... [Il resto dei metodi rimane invariato come nella v5.3.0] ...
-      
-      getPosForGridIndex(idx) {
-        const row = Math.floor(idx / 4);
-        const col = idx % 4;
-        const spacingX = 0.32;
-        const spacingY = 0.32;
-        const startX = -1.5 * spacingX;
-        const startY = 1.35;
-        return new THREE.Vector3(startX + col * spacingX, startY - row * spacingY, -2.2);
-      }
-
       getValidNeighbors(emptyIdx) {
         const row = Math.floor(emptyIdx / 4);
         const col = emptyIdx % 4;
@@ -127,11 +541,14 @@
       swapTile(tileGridIdx, instant = false) {
         const tile = this.grid[tileGridIdx];
         if (!tile) return;
+
         const newPos = this.getPosForGridIndex(this.emptyIndex);
         this.grid[this.emptyIndex] = tile;
         this.grid[tileGridIdx] = null;
+
         tile.userData.gridIdx = this.emptyIndex;
         this.emptyIndex = tileGridIdx;
+
         if (instant) {
           tile.position.copy(newPos);
           tile.userData.targetPos.copy(newPos);
@@ -140,24 +557,37 @@
         }
       }
 
-      getTargetObjects() { return this.tiles; }
+      getTargetObjects() {
+        return this.tiles;
+      }
 
       onHit(hitObject) {
         if (this.isGameOver || this.isWon) return { points: 0, combo: 1 };
         const tile = this.tiles.find(t => t === hitObject);
         if (!tile) return { points: 0, combo: 1 };
+
         const currentIdx = tile.userData.gridIdx;
         const neighbors = this.getValidNeighbors(this.emptyIndex);
+
         if (neighbors.includes(currentIdx)) {
           this.swapTile(currentIdx, false);
+
           if (this.checkWin()) {
             this.isWon = true;
+
             const secondsLeft = Math.floor(Math.max(0, this.timeRemaining));
             const timeBonus = secondsLeft * 100;
             const totalPoints = 1000 + timeBonus;
+
             createFloatingText(`TIME BONUS: +${timeBonus}`, new THREE.Vector3(0, 1.4, -2.0));
             playComboSound(5);
-            setTimeout(() => { if (gameState === 'PLAYING') stopCurrentGame(); }, 3000);
+
+            setTimeout(() => {
+              if (gameState === 'PLAYING') {
+                stopCurrentGame();
+              }
+            }, 3000);
+
             return { points: totalPoints, combo: 1 };
           }
           return { points: 50, combo: 1 };
@@ -167,41 +597,997 @@
 
       checkWin() {
         for (let i = 0; i < 15; i++) {
-          if (!this.grid[i] || this.grid[i].userData.number !== i + 1) return false;
+          if (!this.grid[i] || this.grid[i].userData.number !== i + 1) {
+            return false;
+          }
         }
         return true;
       }
 
       update(delta) {
         this.tiles.forEach(t => {
-          if (t.position.distanceTo(t.userData.targetPos) > 0.001) t.position.lerp(t.userData.targetPos, delta * 15);
-          else t.position.copy(t.userData.targetPos);
+          if (t.position.distanceTo(t.userData.targetPos) > 0.001) {
+            t.position.lerp(t.userData.targetPos, delta * 15);
+          } else {
+            t.position.copy(t.userData.targetPos);
+          }
         });
+
         if (this.isGameOver || this.isWon) return;
+
         this.timeRemaining -= delta;
         const currentSec = Math.ceil(this.timeRemaining);
+
         if (currentSec < this.lastSecondBeep && currentSec >= 0) {
           this.lastSecondBeep = currentSec;
           playBeepSound(currentSec <= 5);
           updateTimerDisplay(this.timeRemaining);
         }
+
         if (this.timeRemaining <= 0 && !this.isGameOver) {
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife();
+          loseLife(); // Perdi vita per Timeout
+
           this.tiles.forEach(t => t.visible = false);
-          setTimeout(() => { stopCurrentGame(); }, 2000);
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
         }
       }
 
       cleanup() {
-        this.tiles.forEach(t => { this.sceneRef.remove(t); t.geometry.dispose(); if(t.material.map) t.material.map.dispose(); t.material.dispose(); });
-        this.tiles = []; this.grid = new Array(16).fill(null);
+        this.tiles.forEach(t => {
+          this.sceneRef.remove(t);
+          t.geometry.dispose();
+          if (t.material.map) t.material.map.dispose();
+          t.material.dispose();
+        });
+        this.tiles = [];
+        this.grid = new Array(16).fill(null);
       }
     }
-    
-    // ... [Il resto del codice resta identico alla v5.3.0] ...
+
+    // ==========================================
+    // MINIGAME 4: COLOR MEMORY
+    // ==========================================
+    class MiniGame4 {
+      constructor(sceneRef) {
+        this.sceneRef = sceneRef;
+        this.name = "Color Memory";
+        this.duration = 45; 
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.isWon = false;
+        this.tiles = [];
+        this.flippedTiles = [];
+        this.isChecking = false;
+        this.matchedPairsCount = 0;
+
+        this.colorPalette = [
+          { name: 'Yellow', hex: 0xffff00 },
+          { name: 'Green',  hex: 0x00ff00 },
+          { name: 'Red',    hex: 0xff0000 },
+          { name: 'Blue',   hex: 0x0066ff },
+          { name: 'Orange', hex: 0xff8800 },
+          { name: 'Purple', hex: 0x9900ff },
+          { name: 'Black',  hex: 0x111111 },
+          { name: 'White',  hex: 0xffffff }
+        ];
+      }
+
+      init() {
+        this.cleanup();
+        this.timeRemaining = this.duration;
+        this.lastSecondBeep = Math.ceil(this.duration);
+        this.isGameOver = false;
+        this.isWon = false;
+        this.flippedTiles = [];
+        this.isChecking = false;
+        this.matchedPairsCount = 0;
+        updateTimerDisplay(this.timeRemaining);
+
+        this.createMemoryBoard();
+      }
+
+      createMemoryBoard() {
+        let colorPairs = [];
+        this.colorPalette.forEach(c => {
+          colorPairs.push(c);
+          colorPairs.push(c);
+        });
+
+        for (let i = colorPairs.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [colorPairs[i], colorPairs[j]] = [colorPairs[j], colorPairs[i]];
+        }
+
+        const spacingX = 0.32, spacingY = 0.32;
+        const startX = -1.5 * spacingX;
+        const startY = 1.35;
+        const geo = new THREE.BoxGeometry(0.28, 0.28, 0.03);
+
+        const frontCanvas = document.createElement('canvas');
+        frontCanvas.width = 128; frontCanvas.height = 128;
+        const fCtx = frontCanvas.getContext('2d');
+        fCtx.fillStyle = '#0d222a'; fCtx.fillRect(0, 0, 128, 128);
+        fCtx.strokeStyle = '#00ffcc'; fCtx.lineWidth = 6; fCtx.strokeRect(4, 4, 120, 120);
+        fCtx.fillStyle = '#00ffcc'; fCtx.font = 'bold 50px Arial';
+        fCtx.textAlign = 'center'; fCtx.textBaseline = 'middle';
+        fCtx.fillText('?', 64, 64);
+        const frontTex = new THREE.CanvasTexture(frontCanvas);
+
+        for (let i = 0; i < 16; i++) {
+          const row = Math.floor(i / 4);
+          const col = i % 4;
+          const colorObj = colorPairs[i];
+
+          const backMat = new THREE.MeshStandardMaterial({ color: colorObj.hex, roughness: 0.2, metalness: 0.3 });
+          const frontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.3 });
+          const sideMat = new THREE.MeshStandardMaterial({ color: 0x051015, roughness: 0.5 });
+
+          const materials = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
+          const tile = new THREE.Mesh(geo, materials);
+
+          tile.position.set(startX + col * spacingX, startY - row * spacingY, -2.2);
+          tile.userData = {
+            id: i,
+            colorInfo: colorObj,
+            isFlipped: false,
+            isMatched: false,
+            targetRotationY: 0
+          };
+
+          this.sceneRef.add(tile);
+          this.tiles.push(tile);
+        }
+      }
+
+      getTargetObjects() {
+        return this.tiles.filter(t => !t.userData.isMatched && !t.userData.isFlipped);
+      }
+
+      onHit(hitObject) {
+        if (this.isGameOver || this.isWon || this.isChecking) return { points: 0, combo: 1 };
+        const tile = this.tiles.find(t => t === hitObject);
+        if (!tile || tile.userData.isFlipped || tile.userData.isMatched) return { points: 0, combo: 1 };
+
+        tile.userData.isFlipped = true;
+        tile.userData.targetRotationY = Math.PI;
+        this.flippedTiles.push(tile);
+
+        if (this.flippedTiles.length === 2) {
+          this.isChecking = true;
+          const [t1, t2] = this.flippedTiles;
+
+          if (t1.userData.colorInfo.hex === t2.userData.colorInfo.hex) {
+            this.matchedPairsCount++;
+            setTimeout(() => {
+              if (this.isGameOver) return;
+
+              t1.userData.isMatched = true;
+              t2.userData.isMatched = true;
+              t1.visible = false;
+              t2.visible = false;
+
+              createExplosion(t1.position, t1.userData.colorInfo.hex);
+              createExplosion(t2.position, t2.userData.colorInfo.hex);
+              playPopSound(false, true);
+
+              this.flippedTiles = [];
+              this.isChecking = false;
+
+              if (this.matchedPairsCount === 8) {
+                this.isWon = true;
+
+                const secondsLeft = Math.floor(Math.max(0, this.timeRemaining));
+                const timeBonus = secondsLeft * 100;
+                const totalPoints = 1000 + timeBonus;
+
+                createFloatingText(`TIME BONUS: +${timeBonus}`, new THREE.Vector3(0, 1.4, -2.0));
+                playComboSound(5);
+
+                setTimeout(() => {
+                  if (gameState === 'PLAYING') {
+                    stopCurrentGame();
+                  }
+                }, 3000);
+              }
+            }, 500);
+
+            return { points: 200, combo: 1 };
+          } else {
+            setTimeout(() => {
+              if (this.isGameOver) return;
+
+              t1.userData.isFlipped = false;
+              t2.userData.isFlipped = false;
+              t1.userData.targetRotationY = 0;
+              t2.userData.targetRotationY = 0;
+
+              playPopSound(true, false);
+
+              this.flippedTiles = [];
+              this.isChecking = false;
+            }, 800);
+
+            return { points: -50, combo: 1 };
+          }
+        }
+
+        return { points: 0, combo: 1 };
+      }
+
+      update(delta) {
+        this.tiles.forEach(t => {
+          if (Math.abs(t.rotation.y - t.userData.targetRotationY) > 0.01) {
+            t.rotation.y = THREE.MathUtils.lerp(t.rotation.y, t.userData.targetRotationY, delta * 24);
+          } else {
+            t.rotation.y = t.userData.targetRotationY;
+          }
+        });
+
+        if (this.isGameOver || this.isWon) return;
+
+        this.timeRemaining -= delta;
+        const currentSec = Math.ceil(this.timeRemaining);
+
+        if (currentSec < this.lastSecondBeep && currentSec >= 0) {
+          this.lastSecondBeep = currentSec;
+          playBeepSound(currentSec <= 5);
+          updateTimerDisplay(this.timeRemaining);
+        }
+
+        if (this.timeRemaining <= 0 && !this.isGameOver) {
+          this.isGameOver = true;
+          updateTimerDisplay(0);
+          playBellSound();
+          loseLife(); // Perdi vita per Timeout
+
+          this.tiles.forEach(t => t.visible = false);
+
+          setTimeout(() => {
+            stopCurrentGame();
+          }, 2000);
+          return;
+        }
+      }
+
+      cleanup() {
+        this.tiles.forEach(t => {
+          this.sceneRef.remove(t);
+          t.geometry.dispose();
+          if (Array.isArray(t.material)) {
+            t.material.forEach(m => {
+              if (m.map) m.map.dispose();
+              m.dispose();
+            });
+          } else {
+            if (t.material.map) t.material.map.dispose();
+            t.material.dispose();
+          }
+        });
+        this.tiles = [];
+        this.flippedTiles = [];
+      }
+    }
+
+    init();
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0c0f1d);
+
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 1.2, 0.5);
+      camera.lookAt(0, 1.0, -2.0);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+      dirLight.position.set(5, 10, 7);
+      scene.add(dirLight);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      renderer.xr.addEventListener('sessionstart', async () => {
+        const session = renderer.xr.getSession();
+        try {
+          const refSpace = await session.requestReferenceSpace('local-floor');
+          renderer.xr.setReferenceSpace(refSpace);
+        } catch (e) {
+          console.warn("'local-floor' space unavailable, fallback to 'local'.", e);
+        }
+
+        if (session.mode === 'immersive-ar') {
+          scene.background = null;
+        } else {
+          scene.background = new THREE.Color(0x0c0f1d);
+        }
+      });
+
+      renderer.xr.addEventListener('sessionend', () => {
+        scene.background = new THREE.Color(0x0c0f1d);
+      });
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1.0, -2.0);
+      controls.update();
+
+      const xrContainer = document.createElement('div');
+      xrContainer.id = 'xr-button-container';
+      document.body.appendChild(xrContainer);
+
+      const vrButton = VRButton.createButton(renderer);
+      const arButton = ARButton.createButton(renderer, { requiredFeatures: ['local-floor'] });
+
+      xrContainer.appendChild(vrButton);
+      xrContainer.appendChild(arButton);
+
+      setupControllers();
+      create3DHUD();
+      createPresentationLogo();
+      create3DTimerDisplay();
+      updateGunRotation();
+
+      miniGameList = [MiniGame1, MiniGame2, MiniGame3, MiniGame4];
+      currentMiniGameIndex = 0;
+      gameState = 'LOBBY';
+      updateHudTexture();
+
+      window.addEventListener('resize', onWindowResize);
+      window.addEventListener('click', initAudio, { once: true });
+      window.addEventListener('pointerdown', onDesktopShoot);
+
+      renderer.setAnimationLoop(animate);
+    }
+
+    function startSelectedGame() {
+      if (activeMiniGame) activeMiniGame.cleanup();
+      gameState = 'PLAYING';
+      score = 0;
+      currentLives = maxLives; 
+      
+      if (logoMesh) logoMesh.visible = false;
+      if (timerMesh) timerMesh.visible = true;
+
+      activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
+      activeMiniGame.init();
+      updateHudTexture();
+      update3DButtonText(btnStartMesh, "⏹ STOP GAME", "#ff2a6d");
+    }
+
+    function stopCurrentGame() {
+      if (activeMiniGame) { activeMiniGame.cleanup(); activeMiniGame = null; }
+      gameState = 'LOBBY';
+      if (logoMesh) logoMesh.visible = true;
+      if (timerMesh) timerMesh.visible = false;
+
+      updateHudTexture();
+      update3DButtonText(btnStartMesh, "▶ START GAME", "#00ffcc");
+    }
+
+    function switchNextMiniGame() {
+      currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
+      if (gameState === 'PLAYING') startSelectedGame();
+      else updateHudTexture();
+    }
+
+    function create3DTimerDisplay() {
+      timerCanvas = document.createElement('canvas');
+      timerCanvas.width = 256;
+      timerCanvas.height = 128;
+      timerCtx = timerCanvas.getContext('2d');
+      timerTexture = new THREE.CanvasTexture(timerCanvas);
+
+      const geo = new THREE.PlaneGeometry(0.8, 0.4);
+      const mat = new THREE.MeshBasicMaterial({ map: timerTexture, transparent: true, side: THREE.DoubleSide });
+      timerMesh = new THREE.Mesh(geo, mat);
+      timerMesh.position.set(0, 2.0, -2.2);
+      timerMesh.visible = false;
+      scene.add(timerMesh);
+    }
+
+    function updateTimerDisplay(secondsLeft) {
+      if (!timerCtx) return;
+      const secInt = Math.max(0, Math.ceil(secondsLeft));
+      const colorHex = secInt <= 5 ? '#ff0000' : '#ffff00';
+
+      timerCtx.clearRect(0, 0, 256, 128);
+      timerCtx.fillStyle = colorHex;
+      timerCtx.font = 'bold 84px Arial';
+      timerCtx.textAlign = 'center';
+      timerCtx.textBaseline = 'middle';
+      timerCtx.fillText(secInt.toString(), 128, 64);
+
+      timerTexture.needsUpdate = true;
+    }
+
+    function createFloatingText(text, position) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#ffea00';
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 5;
+      ctx.strokeText(text, 128, 64);
+      ctx.fillText(text, 128, 64);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 1.0,
+        side: THREE.DoubleSide
+      });
+
+      const geo = new THREE.PlaneGeometry(0.4, 0.2);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(position);
+
+      mesh.userData = { life: 1.2, initialLife: 1.2 };
+      scene.add(mesh);
+      floatingTexts.push(mesh);
+    }
+
+    function updateFloatingTexts(delta) {
+      for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        const ft = floatingTexts[i];
+        ft.userData.life -= delta;
+
+        if (ft.userData.life <= 0) {
+          scene.remove(ft);
+          ft.geometry.dispose();
+          ft.material.map.dispose();
+          ft.material.dispose();
+          floatingTexts.splice(i, 1);
+        } else {
+          ft.position.y += 0.4 * delta;
+          ft.material.opacity = ft.userData.life / ft.userData.initialLife;
+        }
+      }
+    }
+
+    function createPresentationLogo() {
+      const logoGeo = new THREE.PlaneGeometry(1, 1);
+      const logoMat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.05, side: THREE.DoubleSide });
+      logoMesh = new THREE.Mesh(logoGeo, logoMat);
+      logoMesh.position.set(0, 1.45, -1.6);
+      logoMesh.visible = (gameState === 'LOBBY');
+      scene.add(logoMesh);
+
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.load('logo.png', (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        logoMat.map = texture;
+        const aspectRatio = texture.image.width / texture.image.height;
+        const targetHeight = 1.2;
+        logoMesh.scale.set(targetHeight * aspectRatio, targetHeight, 1);
+        logoMat.needsUpdate = true;
+      }, undefined, () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.85)'; ctx.fillRect(10, 10, 492, 236);
+        ctx.strokeStyle = '#ff2a6d'; ctx.lineWidth = 6; ctx.strokeRect(10, 10, 492, 236);
+        ctx.fillStyle = '#ff2a6d'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('BANG BANG', 256, 110);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 42px Arial'; ctx.fillText('BONANZA', 256, 175);
+        logoMat.map = new THREE.CanvasTexture(canvas);
+        logoMesh.scale.set(2.4, 1.2, 1);
+        logoMat.needsUpdate = true;
+      });
+    }
+
+    function initAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playComboSound(comboMultiplier) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const baseFreq = 523.25 * Math.min(1 + (comboMultiplier * 0.15), 2.0);
+      const notes = [baseFreq, baseFreq * 1.25, baseFreq * 1.5];
+
+      notes.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const startTime = now + idx * 0.04;
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        gain.gain.setValueAtTime(0.35, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.12);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.12);
+      });
+    }
+
+    function playBellSound() {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const duration = 1.0;
+
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc1.type = 'sine'; osc2.type = 'sine';
+      osc1.frequency.setValueAtTime(1320, now);
+      osc2.frequency.setValueAtTime(1328, now);
+
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      osc1.connect(gain); osc2.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc1.start(now); osc2.start(now);
+      osc1.stop(now + duration); osc2.stop(now + duration);
+    }
+
+    function playBeepSound(isUrgent = false) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(isUrgent ? 880 : 440, now);
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.08);
+    }
+
+    function playGunshotSound() {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const duration = 0.35;
+
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2800, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + duration);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(1.0, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      const subOsc = audioCtx.createOscillator();
+      const subGain = audioCtx.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(130, now);
+      subOsc.frequency.exponentialRampToValueAtTime(35, now + 0.18);
+      subGain.gain.setValueAtTime(0.8, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      subOsc.connect(subGain); subGain.connect(audioCtx.destination);
+      subOsc.start(now); subOsc.stop(now + 0.18);
+
+      noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+      noise.start(now);
+    }
+
+    function playPopSound(isNegative = false, isTargetExplosion = false) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      if (isNegative) {
+        osc.frequency.setValueAtTime(250, now);
+        osc.frequency.exponentialRampToValueAtTime(70, now + 0.15);
+      } else {
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(1100, now + 0.08);
+      }
+      gain.gain.setValueAtTime(0.7, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.12);
+
+      if (isTargetExplosion) {
+        const burstDuration = 0.12;
+        const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * burstDuration, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(900, now);
+        filter.Q.setValueAtTime(1.2, now);
+
+        const burstGain = audioCtx.createGain();
+        burstGain.gain.setValueAtTime(0.85, now);
+        burstGain.gain.exponentialRampToValueAtTime(0.01, now + burstDuration);
+
+        noise.connect(filter); filter.connect(burstGain); burstGain.connect(audioCtx.destination);
+        noise.start(now);
+      }
+    }
+
+    function playDullSound(duration = 1.0) {
+      initAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const filter = audioCtx.createBiquadFilter();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(90, now);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(180, now);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.05);
+      gain.gain.setValueAtTime(0.35, now + duration - 0.05);
+      gain.gain.linearRampToValueAtTime(0.001, now + duration);
+
+      osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + duration);
+    }
+
+    function createExplosion(position, colorHex) {
+      const count = 30;
+      const geo = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = position.x;
+        positions[i * 3 + 1] = position.y;
+        positions[i * 3 + 2] = position.z;
+
+        const dir = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2
+        ).normalize().multiplyScalar(1.2 + Math.random() * 2.0);
+
+        velocities.push(dir);
+      }
+
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({
+        color: colorHex,
+        size: 0.04,
+        transparent: true,
+        opacity: 1.0
+      });
+
+      const pSystem = new THREE.Points(geo, mat);
+      pSystem.userData = { velocities: velocities, life: 0.4 };
+      scene.add(pSystem);
+      explosions.push(pSystem);
+    }
+
+    function updateExplosions(delta) {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const exp = explosions[i];
+        exp.userData.life -= delta;
+
+        if (exp.userData.life <= 0) {
+          scene.remove(exp);
+          exp.geometry.dispose();
+          exp.material.dispose();
+          explosions.splice(i, 1);
+        } else {
+          const posAttr = exp.geometry.attributes.position;
+          const posArray = posAttr.array;
+          const vels = exp.userData.velocities;
+
+          for (let j = 0; j < vels.length; j++) {
+            posArray[j * 3] += vels[j].x * delta;
+            posArray[j * 3 + 1] += vels[j].y * delta;
+            posArray[j * 3 + 2] += vels[j].z * delta;
+          }
+          posAttr.needsUpdate = true;
+          exp.material.opacity = exp.userData.life / 0.4;
+        }
+      }
+    }
+
+    function create3DHUD() {
+      const hudGroup = new THREE.Group();
+      hudGroup.position.set(-1.25, 1.05, -1.5);
+      hudGroup.rotation.y = THREE.MathUtils.degToRad(32);
+
+      hudCanvas = document.createElement('canvas');
+      hudCanvas.width = 512; hudCanvas.height = 340;
+      hudCtx = hudCanvas.getContext('2d');
+      hudTexture = new THREE.CanvasTexture(hudCanvas);
+      updateHudTexture();
+
+      const panelGeo = new THREE.PlaneGeometry(0.85, 0.58);
+      const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
+      hudGroup.add(new THREE.Mesh(panelGeo, panelMat));
+
+      btnPitchDownMesh = create3DButton("Pitch Down ⤵", 0.24, 0.09);
+      btnPitchDownMesh.position.set(-0.28, -0.38, 0);
+      btnPitchDownMesh.userData = { action: 'pitch_down' };
+      hudGroup.add(btnPitchDownMesh); hudButtons.push(btnPitchDownMesh);
+
+      btnPitchUpMesh = create3DButton("Pitch Up ⤴", 0.24, 0.09);
+      btnPitchUpMesh.position.set(-0.02, -0.38, 0);
+      btnPitchUpMesh.userData = { action: 'pitch_up' };
+      hudGroup.add(btnPitchUpMesh); hudButtons.push(btnPitchUpMesh);
+
+      btnLaserToggleMesh = create3DButton("Laser: ON", 0.24, 0.09);
+      btnLaserToggleMesh.position.set(0.24, -0.38, 0);
+      btnLaserToggleMesh.userData = { action: 'toggle_laser' };
+      hudGroup.add(btnLaserToggleMesh); hudButtons.push(btnLaserToggleMesh);
+
+      btnGameSelectMesh = create3DButton("Select Game 🔄", 0.38, 0.09);
+      btnGameSelectMesh.position.set(-0.21, -0.50, 0);
+      btnGameSelectMesh.userData = { action: 'select_game' };
+      hudGroup.add(btnGameSelectMesh); hudButtons.push(btnGameSelectMesh);
+
+      btnStartMesh = create3DButton("▶ START GAME", 0.38, 0.09, "#00ffcc");
+      btnStartMesh.position.set(0.18, -0.50, 0);
+      btnStartMesh.userData = { action: 'toggle_start' };
+      hudGroup.add(btnStartMesh); hudButtons.push(btnStartMesh);
+
+      scene.add(hudGroup);
+    }
+
+    function updateHudTexture() {
+      hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
+      hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
+      hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.2.1 (Very Scrambled Slider)', 28, 80);
+      hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
+      hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
+      
+      const currentGameInst = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex](scene) : null;
+      const selectedName = currentGameInst ? currentGameInst.name : 'Unknown';
+      const gameIndexLabel = `Game #${currentMiniGameIndex + 1}`;
+      hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; 
+      hudCtx.fillText(`${gameIndexLabel}: ${selectedName}`, 28, 155);
+
+      hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial';
+      let livesText = '';
+      for (let i = 0; i < maxLives; i++) {
+         livesText += (i < currentLives) ? '♥ ' : '♡ '; 
+      }
+      hudCtx.fillText('Lives: ' + livesText, 28, 195);
+
+      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; 
+      hudCtx.fillText('Score: ' + score, 28, 240);
+
+      hudCtx.fillStyle = '#ffb703'; hudCtx.font = 'bold 22px Arial';
+      hudCtx.fillText('Pitch: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 285);
+
+      hudTexture.needsUpdate = true;
+    }
+
+    function create3DButton(label, width, height, strokeColor = '#00ffcc') {
+      const btnCanvas = document.createElement('canvas');
+      btnCanvas.width = 300; btnCanvas.height = 100;
+      const ctx = btnCanvas.getContext('2d');
+      ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 300, 100);
+      ctx.strokeStyle = strokeColor; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 292, 92);
+      ctx.fillStyle = strokeColor; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, 150, 50);
+
+      const btnTex = new THREE.CanvasTexture(btnCanvas);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.04), new THREE.MeshStandardMaterial({ map: btnTex, roughness: 0.3 }));
+      mesh.userData = { canvas: btnCanvas, ctx: ctx, texture: btnTex };
+      return mesh;
+    }
+
+    function update3DButtonText(btnMesh, label, colorHex = '#00ffcc') {
+      const ctx = btnMesh.userData.ctx;
+      ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 300, 100);
+      ctx.strokeStyle = colorHex; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 292, 92);
+      ctx.fillStyle = colorHex; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, 150, 50);
+      btnMesh.userData.texture.needsUpdate = true;
+    }
+
+    function createRedGunModel() {
+      const gunGroup = new THREE.Group();
+      const redGunMat = new THREE.MeshStandardMaterial({ color: 0xe60000, roughness: 0.2, metalness: 0.5 });
+      const blackDetailMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6 });
+
+      const barrelGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.26, 16);
+      barrelGeo.rotateX(Math.PI / 2);
+      const barrel = new THREE.Mesh(barrelGeo, redGunMat);
+      barrel.position.set(0, 0, -0.1);
+      gunGroup.add(barrel);
+
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.04), blackDetailMat);
+      handle.position.set(0, -0.05, 0.02); handle.rotation.x = -0.3;
+      gunGroup.add(handle);
+
+      const ringMesh = new THREE.Mesh(new THREE.TorusGeometry(0.015, 0.003, 8, 24), blackDetailMat);
+      ringMesh.position.set(0, 0.032, 0.02);
+      gunGroup.add(ringMesh);
+
+      const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.012, 0.004), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+      frontSight.position.set(0, 0.026, -0.22);
+      gunGroup.add(frontSight);
+
+      const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -0.23), new THREE.Vector3(0, 0, -15)]);
+      const laserLine = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6 }));
+      laserLine.visible = laserEnabled;
+      gunGroup.add(laserLine);
+      laserLines.push(laserLine);
+
+      return gunGroup;
+    }
+
+    function setupControllers() {
+      for (let i = 0; i < 2; i++) {
+        const controller = renderer.xr.getController(i);
+        const pivot = new THREE.Group();
+        pivot.add(createRedGunModel());
+        controller.add(pivot);
+        controller.addEventListener('selectstart', onXRShoot);
+        scene.add(controller);
+        controllers.push(controller);
+        gunPivots.push(pivot);
+      }
+    }
+
+    function updateGunRotation() {
+      gunPivots.forEach(pivot => { pivot.rotation.x = currentGunPitch; });
+      updateHudTexture();
+    }
+
+    function toggleLaser() {
+      laserEnabled = !laserEnabled;
+      laserLines.forEach(line => line.visible = laserEnabled);
+      update3DButtonText(btnLaserToggleMesh, laserEnabled ? "Laser: ON" : "Laser: OFF");
+    }
+
+    function onXRShoot(event) {
+      const controller = event.target;
+      const pivot = controller.children.find(c => gunPivots.includes(c));
+      if (!pivot) return;
+      const origin = new THREE.Vector3(), worldQuat = new THREE.Quaternion();
+      pivot.getWorldPosition(origin);
+      pivot.getWorldQuaternion(worldQuat);
+      processShot(origin, new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat));
+    }
+
+    function onDesktopShoot(event) {
+      if (renderer.xr.isPresenting) return;
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+      raycaster.setFromCamera(mouse, camera);
+      processShot(raycaster.ray.origin, raycaster.ray.direction);
+    }
+
+    function processShot(origin, direction) {
+      playGunshotSound();
+      const raycaster = new THREE.Raycaster(origin, direction);
+      const gameTargets = (activeMiniGame && gameState === 'PLAYING') ? activeMiniGame.getTargetObjects() : [];
+      const intersects = raycaster.intersectObjects([...gameTargets, ...hudButtons], false);
+      let endPoint = origin.clone().add(direction.clone().multiplyScalar(25));
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        endPoint = hit.point;
+        const hitBtn = hudButtons.find(b => b === hit.object);
+
+        if (hitBtn) {
+          playPopSound(false, false);
+          if (hitBtn.userData.action === 'pitch_down') { currentGunPitch += THREE.MathUtils.degToRad(1); updateGunRotation(); }
+          else if (hitBtn.userData.action === 'pitch_up') { currentGunPitch -= THREE.MathUtils.degToRad(1); updateGunRotation(); }
+          else if (hitBtn.userData.action === 'toggle_laser') { toggleLaser(); }
+          else if (hitBtn.userData.action === 'select_game') { switchNextMiniGame(); }
+          else if (hitBtn.userData.action === 'toggle_start') { if (gameState === 'LOBBY') startSelectedGame(); else stopCurrentGame(); }
+        } else if (activeMiniGame && gameState === 'PLAYING') {
+          let hitColorHex = 0x00ffcc;
+          if (hit.object.userData && hit.object.userData.colorInfo) {
+            hitColorHex = hit.object.userData.colorInfo.hex;
+          } else if (hit.object.material.color) {
+            hitColorHex = hit.object.material.color.getHex();
+          }
+
+          const hitResult = activeMiniGame.onHit(hit.object);
+
+          if (hitResult.points !== 0) {
+            playPopSound(hitResult.points < 0, true);
+            createExplosion(hit.point, hitColorHex);
+
+            if (hitResult.combo > 1) {
+              createFloatingText("Combo X" + hitResult.combo, hit.point.clone());
+              playComboSound(hitResult.combo);
+            }
+
+            score += hitResult.points;
+            if (hitResult.points < 0) {
+              loseLife();
+            } else {
+              updateHudTexture();
+            }
+          }
+        }
+      }
+      createTracer(origin, endPoint);
+    }
+
+    function createTracer(start, end) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([start, end]),
+        new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 1.0 })
+      );
+      line.userData = { life: 0.06 };
+      scene.add(line);
+      tracers.push(line);
+    }
+
+    function updateTracers(delta) {
+      for (let i = tracers.length - 1; i >= 0; i--) {
+        const tracer = tracers[i];
+        tracer.userData.life -= delta;
+        if (tracer.userData.life <= 0) {
+          scene.remove(tracer); tracer.geometry.dispose(); tracer.material.dispose();
+          tracers.splice(i, 1);
+        } else {
+          tracer.material.opacity = tracer.userData.life / 0.06;
+        }
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      const delta = clock.getDelta();
+      if (activeMiniGame && gameState === 'PLAYING') activeMiniGame.update(delta);
+      updateTracers(delta);
+      updateExplosions(delta);
+      updateFloatingTexts(delta);
+      renderer.render(scene, camera);
+    }
   </script>
 </body>
 </html>
