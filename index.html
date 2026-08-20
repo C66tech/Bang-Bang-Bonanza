@@ -55,7 +55,7 @@
     let score = 0;
     let maxLives = 3;
     let currentLives = 3;
-    let gameState = 'LOBBY';
+    let gameState = 'LOBBY'; // LOBBY, INTRO, PLAYING
     let currentGunPitch = THREE.MathUtils.degToRad(-14);
     let laserEnabled = true;
     let activeMiniGame = null, miniGameList = [], currentMiniGameIndex = 0;
@@ -64,6 +64,12 @@
     let btnPitchDownMesh, btnPitchUpMesh, btnLaserToggleMesh, btnGameSelectMesh, btnStartMesh;
     let logoMesh = null;
     let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
+    
+    // Variabili per la gestione della fase di introduzione del minigioco
+    let introMesh = null, introCanvas = null, introCtx = null, introTexture = null;
+    let introTimer = 0;
+    let introStep = 0; // 0 = fermo, 1 = visualizzazione istruzioni (5s), 2 = pausa di attesa (1s)
+
     const clock = new THREE.Clock();
 
     function loseLife() {
@@ -123,7 +129,7 @@
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
         this.elapsedGameTime = 0;
-        updateTimerDisplay(this.timeRemaining);
+        // Il timer visivo viene aggiornato solo quando inizia effettivamente il gioco
 
         this.createTargetCubeMesh();
         this.generateWave();
@@ -321,7 +327,6 @@
         this.lastColorHex = null;
         this.comboStreak = 1;
         this.elapsedGameTime = 0;
-        updateTimerDisplay(this.timeRemaining);
 
         const count = 6, spacingX = 0.40;
         const startX = -((count - 1) * spacingX) / 2;
@@ -470,7 +475,6 @@
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
         this.isWon = false;
-        updateTimerDisplay(this.timeRemaining);
 
         this.createBoard();
         this.shuffleBoard(300);
@@ -651,7 +655,7 @@
     }
 
     // ==========================================
-    // MINIGAME 4: COLOR MEMORY (Nessuna penalità sugli errori)
+    // MINIGAME 4: COLOR MEMORY
     // ==========================================
     class MiniGame4 {
       constructor(sceneRef) {
@@ -688,7 +692,6 @@
         this.flippedTiles = [];
         this.isChecking = false;
         this.matchedPairsCount = 0;
-        updateTimerDisplay(this.timeRemaining);
 
         this.createMemoryBoard();
       }
@@ -800,7 +803,6 @@
 
             return { points: 200, combo: 1 };
           } else {
-            // Errore nell'accoppiamento: nessuna perdita di vita né punti sottratti
             setTimeout(() => {
               if (this.isGameOver) return;
 
@@ -846,7 +848,7 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife(); // Perdi vita solo per scadenza del tempo
+          loseLife();
 
           this.tiles.forEach(t => t.visible = false);
 
@@ -937,6 +939,7 @@
       create3DHUD();
       createPresentationLogo();
       create3DTimerDisplay();
+      createIntroHUD();
       updateGunRotation();
 
       miniGameList = [MiniGame1, MiniGame2, MiniGame3, MiniGame4];
@@ -951,17 +954,99 @@
       renderer.setAnimationLoop(animate);
     }
 
+    // ==========================================
+    // CREAZIONE HUD DI PRESENTAZIONE INTRO
+    // ==========================================
+    function createIntroHUD() {
+      introCanvas = document.createElement('canvas');
+      introCanvas.width = 512;
+      introCanvas.height = 320;
+      introCtx = introCanvas.getContext('2d');
+      introTexture = new THREE.CanvasTexture(introCanvas);
+
+      const geo = new THREE.PlaneGeometry(1.2, 0.75);
+      const mat = new THREE.MeshBasicMaterial({ map: introTexture, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+      introMesh = new THREE.Mesh(geo, mat);
+      introMesh.position.set(0, 1.4, -2.1);
+      introMesh.visible = false;
+      scene.add(introMesh);
+    }
+
+    function showIntroForGame(gameInstance) {
+      let title = gameInstance.name;
+      let duration = gameInstance.duration + " SEC";
+      let instructions = "";
+
+      if (gameInstance.name === "Color Pyramid") {
+        instructions = "Shoot cubes matching the top target color!\nAvoid black penalty blocks.";
+      } else if (gameInstance.name === "Combo Streak") {
+        instructions = "Hit same colors consecutively to\nbuild up a score multiplier combo!";
+      } else if (gameInstance.name === "Grid Slider 15") {
+        instructions = "Shoot adjacent tiles to slide them\ninto order from 1 to 15.";
+      } else if (gameInstance.name === "Color Memory") {
+        instructions = "Shoot pairs of matching colored tiles\nto clear the board before time runs out.";
+      }
+
+      introCtx.fillStyle = 'rgba(10, 15, 30, 0.88)';
+      introCtx.fillRect(0, 0, 512, 320);
+      introCtx.strokeStyle = '#00ffcc';
+      introCtx.lineWidth = 8;
+      introCtx.strokeRect(4, 4, 504, 312);
+
+      // Titolo Gioco
+      introCtx.fillStyle = '#ff2a6d';
+      introCtx.font = 'bold 28px Arial';
+      introCtx.textAlign = 'center';
+      introCtx.fillText(title.toUpperCase(), 256, 45);
+
+      // Durata
+      introCtx.fillStyle = '#ffb703';
+      introCtx.font = 'bold 20px Arial';
+      introCtx.fillText(`TIME LIMIT: ${duration}`, 256, 85);
+
+      // Linea divisoria
+      introCtx.strokeStyle = '#00ffcc';
+      introCtx.lineWidth = 2;
+      introCtx.beginPath();
+      introCtx.moveTo(50, 105);
+      introCtx.lineTo(462, 105);
+      introCtx.stroke();
+
+      // Istruzioni
+      introCtx.fillStyle = '#ffffff';
+      introCtx.font = '19px Arial';
+      let lines = instructions.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        introCtx.fillText(lines[i], 256, 150 + (i * 32));
+      }
+
+      // Avviso
+      introCtx.fillStyle = '#00ffcc';
+      introCtx.font = 'bold 20px Arial';
+      introCtx.fillText("GET READY...", 256, 265);
+
+      introTexture.needsUpdate = true;
+      introMesh.visible = true;
+    }
+
     function startSelectedGame() {
       if (activeMiniGame) activeMiniGame.cleanup();
-      gameState = 'PLAYING';
+      
       score = 0;
       currentLives = maxLives; 
       
       if (logoMesh) logoMesh.visible = false;
-      if (timerMesh) timerMesh.visible = true;
+      if (timerMesh) timerMesh.visible = false; // Il timer si vede solo a gioco avviato
 
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
+
+      // Mostra schermata Intro e imposta lo stato di introduzione
+      showIntroForGame(activeMiniGame);
+      gameState = 'INTRO';
+      introStep = 1; // 1 = visualizzazione per 5 secondi
+      introTimer = 5.0;
+
       updateHudTexture();
       update3DButtonText(btnStartMesh, "⏹ STOP GAME", "#ff2a6d");
     }
@@ -969,6 +1054,8 @@
     function stopCurrentGame() {
       if (activeMiniGame) { activeMiniGame.cleanup(); activeMiniGame = null; }
       gameState = 'LOBBY';
+      introStep = 0;
+      if (introMesh) introMesh.visible = false;
       if (logoMesh) logoMesh.visible = true;
       if (timerMesh) timerMesh.visible = false;
 
@@ -978,7 +1065,7 @@
 
     function switchNextMiniGame() {
       currentMiniGameIndex = (currentMiniGameIndex + 1) % miniGameList.length;
-      if (gameState === 'PLAYING') startSelectedGame();
+      if (gameState === 'PLAYING' || gameState === 'INTRO') startSelectedGame();
       else updateHudTexture();
     }
 
@@ -1377,9 +1464,14 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.2.2 (Memory No-Penalty)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.3.0 (Intro HUD & Readying)', 28, 80);
+      
+      let statusText = 'LOBBY';
+      if (gameState === 'INTRO') statusText = 'GET READY...';
+      else if (gameState === 'PLAYING') statusText = 'IN GAME';
+
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
+      hudCtx.fillText('Status: ' + statusText, 28, 115);
       
       const currentGameInst = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex](scene) : null;
       const selectedName = currentGameInst ? currentGameInst.name : 'Unknown';
@@ -1504,8 +1596,10 @@
     function processShot(origin, direction) {
       playGunshotSound();
       const raycaster = new THREE.Raycaster(origin, direction);
-      const gameTargets = (activeMiniGame && gameState === 'PLAYING') ? activeMiniGame.getTargetObjects() : [];
-      const intersects = raycaster.intersectObjects([...gameTargets, ...hudButtons], false);
+      
+      // Durante la fase INTRO o LOBBY, i colpi possono interagire solo con i pulsanti HUD, non con i bersagli di gioco!
+      const interactableObjects = (gameState === 'PLAYING') ? [...activeMiniGame.getTargetObjects(), ...hudButtons] : hudButtons;
+      const intersects = raycaster.intersectObjects(interactableObjects, false);
       let endPoint = origin.clone().add(direction.clone().multiplyScalar(25));
 
       if (intersects.length > 0) {
@@ -1582,7 +1676,29 @@
 
     function animate() {
       const delta = clock.getDelta();
-      if (activeMiniGame && gameState === 'PLAYING') activeMiniGame.update(delta);
+
+      // Gestione della fase di introduzione (5s HUD + 1s pausa senza effetti)
+      if (gameState === 'INTRO') {
+        introTimer -= delta;
+        if (introStep === 1 && introTimer <= 0) {
+          // Passati 5 secondi, nascondiamo la schermata HUD di presentazione
+          if (introMesh) introMesh.visible = false;
+          introStep = 2; // Avviamo la pausa di attesa di 1 secondo
+          introTimer = 1.0; 
+        } else if (introStep === 2 && introTimer <= 0) {
+          // Passato anche il secondo di attesa, facciamo partire ufficialmente il gioco!
+          gameState = 'PLAYING';
+          introStep = 0;
+          if (timerMesh) timerMesh.visible = true;
+          updateTimerDisplay(activeMiniGame.timeRemaining);
+          updateHudTexture();
+        }
+      }
+
+      if (activeMiniGame && gameState === 'PLAYING') {
+        activeMiniGame.update(delta);
+      }
+
       updateTracers(delta);
       updateExplosions(delta);
       updateFloatingTexts(delta);
