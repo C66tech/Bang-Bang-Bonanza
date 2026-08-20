@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -65,12 +65,12 @@
     const clock = new THREE.Clock();
 
     // ==========================================
-    // NUOVO MINIGIOCO 1 (Triangolo + Cubo Riferimento)
+    // MINIGAME 1: COLOR PYRAMID
     // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
         this.scene = sceneRef;
-        this.name = "Minigioco 1";
+        this.name = "Color Pyramid";
         this.duration = 20;
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
@@ -79,13 +79,13 @@
         this.targetCube = null;
         this.targetColorObj = null;
         this.colorPalette = [
-          { name: 'Giallo', hex: 0xffff00, points: 100 },
-          { name: 'Verde',  hex: 0x00ff00, points: 100 },
-          { name: 'Rosso',  hex: 0xff0000, points: 100 },
-          { name: 'Blu',    hex: 0x0066ff, points: 100 },
-          { name: 'Arancio',hex: 0xff8800, points: 100 },
-          { name: 'Viola',  hex: 0x9900ff, points: 100 },
-          { name: 'Nero',   hex: 0x111111, points: -100 }
+          { name: 'Yellow', hex: 0xffff00, points: 100 },
+          { name: 'Green',  hex: 0x00ff00, points: 100 },
+          { name: 'Red',    hex: 0xff0000, points: 100 },
+          { name: 'Blue',   hex: 0x0066ff, points: 100 },
+          { name: 'Orange', hex: 0xff8800, points: 100 },
+          { name: 'Purple', hex: 0x9900ff, points: 100 },
+          { name: 'Black',  hex: 0x111111, points: -100 }
         ];
       }
 
@@ -104,7 +104,7 @@
         const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
         const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
         this.targetCube = new THREE.Mesh(geo, mat);
-        this.targetCube.position.set(1.2, 0.95, -2.0); // Posizionato sulla destra
+        this.targetCube.position.set(1.2, 0.95, -2.0);
         this.scene.add(this.targetCube);
       }
 
@@ -112,7 +112,6 @@
         this.spheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.spheres = [];
 
-        // Generazione Triangolo: 6 righe (1, 2, 3, 4, 5, 6)
         const rows = 6;
         const spacingX = 0.28, spacingY = 0.22;
         const startY = 1.35, centerZ = -2.2;
@@ -132,7 +131,6 @@
           }
         }
 
-        // Selezione colore del cubo di riferimento tra quelli presenti nella griglia
         const validSpheres = this.spheres.filter(s => s.userData.colorInfo.points > 0);
         if (validSpheres.length > 0) {
           const randomTargetSphere = validSpheres[Math.floor(Math.random() * validSpheres.length)];
@@ -163,7 +161,6 @@
         const isCorrect = (sphere.userData.colorInfo.hex === this.targetColorObj.hex);
         const earnedPoints = isCorrect ? 100 : -100;
 
-        // Controllo se sono state esaurite tutte le sfere del colore target
         const remainingTargetSpheres = this.spheres.filter(s => s.userData.active && s.visible && s.userData.colorInfo.hex === this.targetColorObj.hex);
 
         if (remainingTargetSpheres.length === 0) {
@@ -222,12 +219,12 @@
     }
 
     // ==========================================
-    // MINIGIOCO 2 (6 Sfere + Combo dello Stesso Colore)
+    // MINIGAME 2: COMBO STREAK
     // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
         this.scene = sceneRef;
-        this.name = "Minigioco 2";
+        this.name = "Combo Streak";
         this.duration = 20;
         this.timeRemaining = this.duration;
         this.lastSecondBeep = Math.ceil(this.duration);
@@ -238,13 +235,13 @@
         this.lastColorHex = null;
         this.comboStreak = 1;
         this.colorPalette = [
-          { name: 'Giallo', hex: 0xffff00, points: 100 },
-          { name: 'Verde',  hex: 0x00ff00, points: 100 },
-          { name: 'Rosso',  hex: 0xff0000, points: 100 },
-          { name: 'Blu',    hex: 0x0066ff, points: 100 },
-          { name: 'Arancio',hex: 0xff8800, points: 100 },
-          { name: 'Viola',  hex: 0x9900ff, points: 100 },
-          { name: 'Nero',   hex: 0x111111, points: -100 }
+          { name: 'Yellow', hex: 0xffff00, points: 100 },
+          { name: 'Green',  hex: 0x00ff00, points: 100 },
+          { name: 'Red',    hex: 0xff0000, points: 100 },
+          { name: 'Blue',   hex: 0x0066ff, points: 100 },
+          { name: 'Orange', hex: 0xff8800, points: 100 },
+          { name: 'Purple', hex: 0x9900ff, points: 100 },
+          { name: 'Black',  hex: 0x111111, points: -100 }
         ];
       }
 
@@ -395,7 +392,7 @@
           const refSpace = await session.requestReferenceSpace('local-floor');
           renderer.xr.setReferenceSpace(refSpace);
         } catch (e) {
-          console.warn("Spazio 'local-floor' non disponibile, fallback su 'local'.", e);
+          console.warn("'local-floor' space unavailable, fallback to 'local'.", e);
         }
 
         if (session.mode === 'immersive-ar') {
@@ -451,7 +448,7 @@
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
       updateHudTexture();
-      update3DButtonText(btnStartMesh, "⏹ STOP GIOCO", "#ff2a6d");
+      update3DButtonText(btnStartMesh, "⏹ STOP GAME", "#ff2a6d");
     }
 
     function stopCurrentGame() {
@@ -461,7 +458,7 @@
       if (timerMesh) timerMesh.visible = false;
 
       updateHudTexture();
-      update3DButtonText(btnStartMesh, "▶ START GIOCO", "#00ffcc");
+      update3DButtonText(btnStartMesh, "▶ START GAME", "#00ffcc");
     }
 
     function switchNextMiniGame() {
@@ -833,12 +830,12 @@
       const panelMat = new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true, side: THREE.DoubleSide });
       hudGroup.add(new THREE.Mesh(panelGeo, panelMat));
 
-      btnPitchDownMesh = create3DButton("Inclina Avanti ⤵", 0.24, 0.09);
+      btnPitchDownMesh = create3DButton("Pitch Down ⤵", 0.24, 0.09);
       btnPitchDownMesh.position.set(-0.28, -0.38, 0);
       btnPitchDownMesh.userData = { action: 'pitch_down' };
       hudGroup.add(btnPitchDownMesh); hudButtons.push(btnPitchDownMesh);
 
-      btnPitchUpMesh = create3DButton("Inclina Indietro ⤴", 0.24, 0.09);
+      btnPitchUpMesh = create3DButton("Pitch Up ⤴", 0.24, 0.09);
       btnPitchUpMesh.position.set(-0.02, -0.38, 0);
       btnPitchUpMesh.userData = { action: 'pitch_up' };
       hudGroup.add(btnPitchUpMesh); hudButtons.push(btnPitchUpMesh);
@@ -848,12 +845,12 @@
       btnLaserToggleMesh.userData = { action: 'toggle_laser' };
       hudGroup.add(btnLaserToggleMesh); hudButtons.push(btnLaserToggleMesh);
 
-      btnGameSelectMesh = create3DButton("Cambia Gioco 🔄", 0.38, 0.09);
+      btnGameSelectMesh = create3DButton("Select Game 🔄", 0.38, 0.09);
       btnGameSelectMesh.position.set(-0.21, -0.50, 0);
       btnGameSelectMesh.userData = { action: 'select_game' };
       hudGroup.add(btnGameSelectMesh); hudButtons.push(btnGameSelectMesh);
 
-      btnStartMesh = create3DButton("▶ START GIOCO", 0.38, 0.09, "#00ffcc");
+      btnStartMesh = create3DButton("▶ START GAME", 0.38, 0.09, "#00ffcc");
       btnStartMesh.position.set(0.18, -0.50, 0);
       btnStartMesh.userData = { action: 'toggle_start' };
       hudGroup.add(btnStartMesh); hudButtons.push(btnStartMesh);
@@ -865,14 +862,22 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Versione: v3.7.0 (Triangle Mode)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v3.8.0 (Custom Names & ENG)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
-      hudCtx.fillText('Stato: ' + (gameState === 'PLAYING' ? 'IN GIOCO' : 'PRESENTAZIONE'), 28, 115);
-      const selectedName = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex]().name : 'Minigioco 1';
-      hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; hudCtx.fillText('Gioco: ' + selectedName, 28, 155);
-      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; hudCtx.fillText('Punti: ' + score, 28, 220);
+      hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
+      
+      const currentGameInst = miniGameList[currentMiniGameIndex] ? new miniGameList[currentMiniGameIndex](scene) : null;
+      const selectedName = currentGameInst ? currentGameInst.name : 'Unknown';
+      const gameIndexLabel = `Game #${currentMiniGameIndex + 1}`;
+      hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; 
+      hudCtx.fillText(`${gameIndexLabel}: ${selectedName}`, 28, 155);
+
+      hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; 
+      hudCtx.fillText('Score: ' + score, 28, 220);
+
       hudCtx.fillStyle = '#ffb703'; hudCtx.font = 'bold 22px Arial';
-      hudCtx.fillText('Inclinazione: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 275);
+      hudCtx.fillText('Pitch: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 275);
+
       hudTexture.needsUpdate = true;
     }
 
