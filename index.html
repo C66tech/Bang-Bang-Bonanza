@@ -66,14 +66,12 @@
     let timerMesh = null, timerCanvas = null, timerCtx = null, timerTexture = null;
     const clock = new THREE.Clock();
 
-    // Funzione globale per gestire la perdita della vita
     function loseLife() {
       if (gameState !== 'PLAYING') return;
       currentLives--;
       updateHudTexture();
 
       if (currentLives <= 0) {
-        // Se si perdono le vite durante una mossa attiva (no timeout)
         if (activeMiniGame && !activeMiniGame.isGameOver) {
           activeMiniGame.isGameOver = true;
           
@@ -98,7 +96,7 @@
     // ==========================================
     class MiniGame1 {
       constructor(sceneRef) {
-        this.scene = sceneRef;
+        this.sceneRef = sceneRef;
         this.name = "Color Pyramid";
         this.duration = 20;
         this.timeRemaining = this.duration;
@@ -136,11 +134,11 @@
         const mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.5 });
         this.targetCube = new THREE.Mesh(geo, mat);
         this.targetCube.position.set(0.0, 1.70, -2.2);
-        this.scene.add(this.targetCube);
+        this.sceneRef.add(this.targetCube);
       }
 
       generateWave() {
-        this.cubes.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes.forEach(s => { this.sceneRef.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.cubes = [];
 
         const validColors = this.colorPalette.filter(c => c.points > 0);
@@ -187,7 +185,7 @@
               wobbleAmpPos: 0.008 + Math.random() * 0.005
             };
 
-            this.scene.add(cube);
+            this.sceneRef.add(cube);
             this.cubes.push(cube);
 
             cubeCount++;
@@ -240,7 +238,7 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife(); // Perdi vita per Timeout
+          loseLife();
 
           this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
           if (this.targetCube) this.targetCube.visible = false;
@@ -274,10 +272,10 @@
       }
 
       cleanup() {
-        this.cubes.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes.forEach(s => { this.sceneRef.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.cubes = [];
         if (this.targetCube) {
-          this.scene.remove(this.targetCube);
+          this.sceneRef.remove(this.targetCube);
           this.targetCube.geometry.dispose();
           this.targetCube.material.dispose();
           this.targetCube = null;
@@ -290,7 +288,7 @@
     // ==========================================
     class MiniGame2 {
       constructor(sceneRef) {
-        this.scene = sceneRef;
+        this.sceneRef = sceneRef;
         this.name = "Combo Streak";
         this.duration = 20;
         this.timeRemaining = this.duration;
@@ -348,7 +346,7 @@
             wobbleAmpRot: 0.08,
             wobbleAmpPos: 0.01
           };
-          this.scene.add(cube);
+          this.sceneRef.add(cube);
           this.cubes.push(cube);
         }
       }
@@ -402,7 +400,7 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife(); // Perdi vita per Timeout
+          loseLife();
 
           this.cubes.forEach(s => { s.userData.active = false; s.visible = false; });
 
@@ -444,17 +442,17 @@
       }
 
       cleanup() {
-        this.cubes.forEach(s => { this.scene.remove(s); s.geometry.dispose(); s.material.dispose(); });
+        this.cubes.forEach(s => { this.sceneRef.remove(s); s.geometry.dispose(); s.material.dispose(); });
         this.cubes = [];
       }
     }
 
     // ==========================================
-    // MINIGAME 3: GRID SLIDER 15
+    // MINIGAME 3: GRID SLIDER 15 (Random & Solvable, Colored)
     // ==========================================
     class MiniGame3 {
       constructor(sceneRef) {
-        this.scene = sceneRef;
+        this.sceneRef = sceneRef;
         this.name = "Grid Slider 15";
         this.duration = 60;
         this.timeRemaining = this.duration;
@@ -475,7 +473,6 @@
         updateTimerDisplay(this.timeRemaining);
 
         this.createBoard();
-        this.shuffleBoard(14);
       }
 
       getPosForGridIndex(idx) {
@@ -488,44 +485,76 @@
         return new THREE.Vector3(startX + col * spacingX, startY - row * spacingY, -2.2);
       }
 
+      generateSolvableSequence() {
+        let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        
+        // Rimescolamento casuale array
+        for (let i = nums.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [nums[i], nums[j]] = [nums[j], nums[i]];
+        }
+        
+        // Conta le inversioni per verificare la risolvibilità (casella vuota in fondo a dx)
+        let inversions = 0;
+        for (let i = 0; i < nums.length - 1; i++) {
+          for (let j = i + 1; j < nums.length; j++) {
+            if (nums[i] > nums[j]) inversions++;
+          }
+        }
+        
+        // Se le inversioni sono dispari, scambia gli ultimi due elementi per renderlo pari (risolvibile)
+        if (inversions % 2 !== 0) {
+          [nums[0], nums[1]] = [nums[1], nums[0]];
+        }
+        
+        return nums;
+      }
+
       createBoard() {
+        const nums = this.generateSolvableSequence();
         const geo = new THREE.BoxGeometry(0.28, 0.28, 0.04);
-        for (let num = 1; num <= 15; num++) {
+        
+        for (let i = 0; i < 15; i++) {
+          const num = nums[i];
+          const isEven = (num % 2 === 0);
+          
+          const bgColor = isEven ? '#ffff00' : '#ff0000';
+          const textColor = isEven ? '#000000' : '#ffffff';
+
           const canvas = document.createElement('canvas');
           canvas.width = 128; canvas.height = 128;
           const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#0d222a'; ctx.fillRect(0, 0, 128, 128);
-          ctx.strokeStyle = '#00ffcc'; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 120, 120);
-          ctx.fillStyle = '#ffea00'; ctx.font = 'bold 54px Arial';
-          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          
+          // Sfondo colorato
+          ctx.fillStyle = bgColor; 
+          ctx.fillRect(0, 0, 128, 128);
+          // Bordo scuro per contrasto
+          ctx.strokeStyle = '#111111'; 
+          ctx.lineWidth = 8; 
+          ctx.strokeRect(4, 4, 120, 120);
+          
+          // Testo
+          ctx.fillStyle = textColor; 
+          ctx.font = 'bold 54px Arial';
+          ctx.textAlign = 'center'; 
+          ctx.textBaseline = 'middle';
           ctx.fillText(num.toString(), 64, 64);
 
           const tex = new THREE.CanvasTexture(canvas);
           const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3 });
           const mesh = new THREE.Mesh(geo, mat);
 
-          const initialIdx = num - 1;
-          const pos = this.getPosForGridIndex(initialIdx);
+          const pos = this.getPosForGridIndex(i);
           mesh.position.copy(pos);
-          mesh.userData = { number: num, gridIdx: initialIdx, targetPos: pos.clone() };
+          mesh.userData = { number: num, gridIdx: i, targetPos: pos.clone() };
 
-          this.scene.add(mesh);
+          this.sceneRef.add(mesh);
           this.tiles.push(mesh);
-          this.grid[initialIdx] = mesh;
+          this.grid[i] = mesh;
         }
+        
         this.emptyIndex = 15;
         this.grid[15] = null;
-      }
-
-      shuffleBoard(movesCount) {
-        let lastMovedIdx = -1;
-        for (let i = 0; i < movesCount; i++) {
-          const validNeighbors = this.getValidNeighbors(this.emptyIndex).filter(idx => idx !== lastMovedIdx);
-          if (validNeighbors.length === 0) continue;
-          const chosenIdx = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
-          this.swapTile(chosenIdx, true);
-          lastMovedIdx = this.emptyIndex;
-        }
       }
 
       getValidNeighbors(emptyIdx) {
@@ -629,7 +658,7 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife(); // Perdi vita per Timeout
+          loseLife();
 
           this.tiles.forEach(t => t.visible = false);
 
@@ -642,7 +671,7 @@
 
       cleanup() {
         this.tiles.forEach(t => {
-          this.scene.remove(t);
+          this.sceneRef.remove(t);
           t.geometry.dispose();
           if (t.material.map) t.material.map.dispose();
           t.material.dispose();
@@ -657,7 +686,7 @@
     // ==========================================
     class MiniGame4 {
       constructor(sceneRef) {
-        this.scene = sceneRef;
+        this.sceneRef = sceneRef;
         this.name = "Color Memory";
         this.duration = 45; 
         this.timeRemaining = this.duration;
@@ -743,7 +772,7 @@
             targetRotationY: 0
           };
 
-          this.scene.add(tile);
+          this.sceneRef.add(tile);
           this.tiles.push(tile);
         }
       }
@@ -847,7 +876,7 @@
           this.isGameOver = true;
           updateTimerDisplay(0);
           playBellSound();
-          loseLife(); // Perdi vita per Timeout
+          loseLife();
 
           this.tiles.forEach(t => t.visible = false);
 
@@ -860,7 +889,7 @@
 
       cleanup() {
         this.tiles.forEach(t => {
-          this.scene.remove(t);
+          this.sceneRef.remove(t);
           t.geometry.dispose();
           if (Array.isArray(t.material)) {
             t.material.forEach(m => {
@@ -956,7 +985,7 @@
       if (activeMiniGame) activeMiniGame.cleanup();
       gameState = 'PLAYING';
       score = 0;
-      currentLives = maxLives; // Ripristina le vite ad ogni nuovo start (per ora)
+      currentLives = maxLives; 
       
       if (logoMesh) logoMesh.visible = false;
       if (timerMesh) timerMesh.visible = true;
@@ -1378,7 +1407,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.2.0 (Lives System)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.3.0 (Colored & Random 15-Puzzle)', 28, 80);
       hudCtx.fillStyle = gameState === 'PLAYING' ? '#00ffcc' : '#ffb703'; hudCtx.font = 'bold 20px Arial';
       hudCtx.fillText('Status: ' + (gameState === 'PLAYING' ? 'IN GAME' : 'LOBBY'), 28, 115);
       
@@ -1388,7 +1417,6 @@
       hudCtx.fillStyle = '#00ffcc'; hudCtx.font = 'bold 22px Arial'; 
       hudCtx.fillText(`${gameIndexLabel}: ${selectedName}`, 28, 155);
 
-      // Rendering delle Vite (Lives)
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial';
       let livesText = '';
       for (let i = 0; i < maxLives; i++) {
@@ -1396,11 +1424,9 @@
       }
       hudCtx.fillText('Lives: ' + livesText, 28, 195);
 
-      // Score
       hudCtx.fillStyle = score >= 0 ? '#00ffcc' : '#ff2a6d'; hudCtx.font = 'bold 32px Arial'; 
       hudCtx.fillText('Score: ' + score, 28, 240);
 
-      // Pitch
       hudCtx.fillStyle = '#ffb703'; hudCtx.font = 'bold 22px Arial';
       hudCtx.fillText('Pitch: ' + Math.round(THREE.MathUtils.radToDeg(currentGunPitch)) + '°', 28, 285);
 
@@ -1544,8 +1570,6 @@
             }
 
             score += hitResult.points;
-            
-            // Scalare una vita se i punti sono negativi
             if (hitResult.points < 0) {
               loseLife();
             } else {
@@ -1597,3 +1621,4 @@
   </script>
 </body>
 </html>
+``` Qual è la prossima feature da aggiungere alla nostra Modalità Arcade in costruzione?
