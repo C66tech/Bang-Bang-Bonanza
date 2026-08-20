@@ -68,7 +68,7 @@
     // Variabili per la gestione della fase di introduzione del minigioco
     let introMesh = null, introCanvas = null, introCtx = null, introTexture = null;
     let introTimer = 0;
-    let introStep = 0; // 0 = fermo, 1 = visualizzazione istruzioni (5s), 2 = pausa di attesa (1s)
+    let introStep = 0;
 
     const clock = new THREE.Clock();
 
@@ -129,7 +129,6 @@
         this.lastSecondBeep = Math.ceil(this.duration);
         this.isGameOver = false;
         this.elapsedGameTime = 0;
-        // Il timer visivo viene aggiornato solo quando inizia effettivamente il gioco
 
         this.createTargetCubeMesh();
         this.generateWave();
@@ -511,7 +510,7 @@
           mesh.position.copy(pos);
           mesh.userData = { number: num, gridIdx: initialIdx, targetPos: pos.clone() };
 
-          this.scene.add(mesh);
+          this.sceneRef.add(mesh);
           this.tiles.push(mesh);
           this.grid[initialIdx] = mesh;
         }
@@ -644,7 +643,7 @@
 
       cleanup() {
         this.tiles.forEach(t => {
-          this.scene.remove(t);
+          this.sceneRef.remove(t);
           t.geometry.dispose();
           if (t.material.map) t.material.map.dispose();
           t.material.dispose();
@@ -655,7 +654,7 @@
     }
 
     // ==========================================
-    // MINIGAME 4: COLOR MEMORY
+    // MINIGAME 4: COLOR MEMORY (Corretto)
     // ==========================================
     class MiniGame4 {
       constructor(sceneRef) {
@@ -744,7 +743,7 @@
             targetRotationY: 0
           };
 
-          this.scene.add(tile);
+          this.sceneRef.add(tile); // CORRETTO: Uso corretto di sceneRef
           this.tiles.push(tile);
         }
       }
@@ -861,7 +860,7 @@
 
       cleanup() {
         this.tiles.forEach(t => {
-          this.scene.remove(t);
+          this.sceneRef.remove(t);
           t.geometry.dispose();
           if (Array.isArray(t.material)) {
             t.material.forEach(m => {
@@ -987,7 +986,10 @@
         instructions = "Shoot pairs of matching colored tiles\nto clear the board before time runs out.";
       }
 
-      introCtx.fillStyle = 'rgba(10, 15, 30, 0.88)';
+      // CORRETTO: Pulisce completamente il canvas prima di ridisegnare, evitando sovrapposizioni
+      introCtx.clearRect(0, 0, 512, 320);
+
+      introCtx.fillStyle = 'rgba(10, 15, 30, 0.95)';
       introCtx.fillRect(0, 0, 512, 320);
       introCtx.strokeStyle = '#00ffcc';
       introCtx.lineWidth = 8;
@@ -1036,15 +1038,14 @@
       currentLives = maxLives; 
       
       if (logoMesh) logoMesh.visible = false;
-      if (timerMesh) timerMesh.visible = false; // Il timer si vede solo a gioco avviato
+      if (timerMesh) timerMesh.visible = false;
 
       activeMiniGame = new miniGameList[currentMiniGameIndex](scene);
       activeMiniGame.init();
 
-      // Mostra schermata Intro e imposta lo stato di introduzione
       showIntroForGame(activeMiniGame);
       gameState = 'INTRO';
-      introStep = 1; // 1 = visualizzazione per 5 secondi
+      introStep = 1;
       introTimer = 5.0;
 
       updateHudTexture();
@@ -1464,7 +1465,7 @@
       hudCtx.fillStyle = '#0a0f1e'; hudCtx.fillRect(0, 0, 512, 340);
       hudCtx.strokeStyle = '#00ffcc'; hudCtx.lineWidth = 8; hudCtx.strokeRect(4, 4, 504, 332);
       hudCtx.fillStyle = '#ff2a6d'; hudCtx.font = 'bold 26px Arial'; hudCtx.fillText('BANG BANG BONANZA', 28, 45);
-      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.3.0 (Intro HUD & Readying)', 28, 80);
+      hudCtx.fillStyle = '#ffffff'; hudCtx.font = 'bold 18px Arial'; hudCtx.fillText('Version: v5.3.1 (Fixed Memory & Intro)', 28, 80);
       
       let statusText = 'LOBBY';
       if (gameState === 'INTRO') statusText = 'GET READY...';
@@ -1597,7 +1598,6 @@
       playGunshotSound();
       const raycaster = new THREE.Raycaster(origin, direction);
       
-      // Durante la fase INTRO o LOBBY, i colpi possono interagire solo con i pulsanti HUD, non con i bersagli di gioco!
       const interactableObjects = (gameState === 'PLAYING') ? [...activeMiniGame.getTargetObjects(), ...hudButtons] : hudButtons;
       const intersects = raycaster.intersectObjects(interactableObjects, false);
       let endPoint = origin.clone().add(direction.clone().multiplyScalar(25));
@@ -1677,16 +1677,13 @@
     function animate() {
       const delta = clock.getDelta();
 
-      // Gestione della fase di introduzione (5s HUD + 1s pausa senza effetti)
       if (gameState === 'INTRO') {
         introTimer -= delta;
         if (introStep === 1 && introTimer <= 0) {
-          // Passati 5 secondi, nascondiamo la schermata HUD di presentazione
           if (introMesh) introMesh.visible = false;
-          introStep = 2; // Avviamo la pausa di attesa di 1 secondo
+          introStep = 2;
           introTimer = 1.0; 
         } else if (introStep === 2 && introTimer <= 0) {
-          // Passato anche il secondo di attesa, facciamo partire ufficialmente il gioco!
           gameState = 'PLAYING';
           introStep = 0;
           if (timerMesh) timerMesh.visible = true;
